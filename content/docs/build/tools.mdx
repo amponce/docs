@@ -160,8 +160,8 @@ For complex workflows that require multiple sequential HTTP calls, use the `pipe
         "timeoutMs": 3000
       },
       "parameters": {
-        "date": "\{\{date\}\}",
-        "time": "\{\{time\}\}"
+        "date": "{{date}}",
+        "time": "{{time}}"
       },
       "condition": "always"
     },
@@ -172,9 +172,9 @@ For complex workflows that require multiple sequential HTTP calls, use the `pipe
         "timeoutMs": 5000
       },
       "parameters": {
-        "date": "\{\{date\}\}",
-        "time": "\{\{time\}\}",
-        "service": "\{\{service\}\}"
+        "date": "{{date}}",
+        "time": "{{time}}",
+        "service": "{{service}}"
       },
       "condition": "available == true"
     }

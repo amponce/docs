@@ -7,16 +7,16 @@ The system prompt is the most important part of your agent configuration. It def
 
 ## Dynamic Variables
 
-System prompts support `\{\{mustache\}\}` syntax for dynamic variable injection. Variables are resolved at the start of each call using data passed in the call request.
+System prompts support `{{mustache}}` syntax for dynamic variable injection. Variables are resolved at the start of each call using data passed in the call request.
 
 ```json
 {
   "model": {
     "provider": "openai",
     "model": "gpt-4o-mini",
-    "systemPrompt": "You are a support agent for \{\{companyName\}\}. The caller's name is \{\{callerName\}\} and their account ID is \{\{accountId\}\}. Greet them by name."
+    "systemPrompt": "You are a support agent for {{companyName}}. The caller's name is {{callerName}} and their account ID is {{accountId}}. Greet them by name."
   },
-  "firstMessage": "Hi \{\{callerName\}\}, thanks for calling \{\{companyName\}\}!"
+  "firstMessage": "Hi {{callerName}}, thanks for calling {{companyName}}!"
 }
 ```
 
@@ -57,7 +57,7 @@ const call = await client.calls.createPhone({
 </Tabs>
 
 <Callout type="info" title="Tip">
-  Unresolved variables (where no value is provided) are left as-is in the prompt. This means the LLM will see the literal `\{\{variableName\}\}` text, which can cause confusion. Always provide values for all variables you reference.
+  Unresolved variables (where no value is provided) are left as-is in the prompt. This means the LLM will see the literal `{{variableName}}` text, which can cause confusion. Always provide values for all variables you reference.
 </Callout>
 
 ## Best Practices for Voice AI Prompts
@@ -132,11 +132,11 @@ Always end calls by asking "Is there anything else I can help you with?"
 ### Outbound Sales
 
 ```
-You are a sales representative for \{\{companyName\}\} calling \{\{contactName\}\}.
+You are a sales representative for {{companyName}} calling {{contactName}}.
 
-Purpose: Introduce our new \{\{productName\}\} plan and schedule a demo.
+Purpose: Introduce our new {{productName}} plan and schedule a demo.
 
-Opening: Introduce yourself, confirm you're speaking with \{\{contactName\}\},
+Opening: Introduce yourself, confirm you're speaking with {{contactName}},
 and ask if they have 2 minutes.
 
 If they say no or seem busy:
@@ -145,8 +145,8 @@ If they say no or seem busy:
 - Thank them and end the call
 
 If they're open to talking:
-1. Ask about their current workflow for \{\{useCase\}\}
-2. Briefly explain how \{\{productName\}\} solves common pain points (30 seconds max)
+1. Ask about their current workflow for {{useCase}}
+2. Briefly explain how {{productName}} solves common pain points (30 seconds max)
 3. Offer to schedule a 15-minute demo
 
 Rules:
@@ -185,14 +185,14 @@ step and ask "Did that work?" before continuing.
 
 ```
 You are an automated appointment reminder calling on behalf of
-\{\{clinicName\}\}.
+{{clinicName}}.
 
-Purpose: Remind \{\{patientName\}\} about their appointment on \{\{appointmentDate\}\}
-at \{\{appointmentTime\}\} with \{\{providerName\}\}.
+Purpose: Remind {{patientName}} about their appointment on {{appointmentDate}}
+at {{appointmentTime}} with {{providerName}}.
 
 Script:
-1. Greet the patient and identify yourself as calling from \{\{clinicName\}\}
-2. Confirm you're speaking with \{\{patientName\}\}
+1. Greet the patient and identify yourself as calling from {{clinicName}}
+2. Confirm you're speaking with {{patientName}}
 3. Remind them of the appointment details
 4. Ask if they'd like to confirm, reschedule, or cancel
 
@@ -213,7 +213,7 @@ You can build reusable prompt templates by combining dynamic variables with a ba
   "model": {
     "provider": "openai",
     "model": "gpt-4o-mini",
-    "systemPrompt": "You are a \{\{agentRole\}\} for \{\{companyName\}\}.\n\n\{\{customInstructions\}\}\n\nTone: \{\{tone\}\}\nLanguage: \{\{language\}\}\n\nAlways end the call by asking if there's anything else you can help with."
+    "systemPrompt": "You are a {{agentRole}} for {{companyName}}.\n\n{{customInstructions}}\n\nTone: {{tone}}\nLanguage: {{language}}\n\nAlways end the call by asking if there's anything else you can help with."
   }
 }
 ```

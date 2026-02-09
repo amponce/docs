@@ -101,7 +101,7 @@ print(call["status"])  # "queued"
 | `from` | `string` | Yes | Your Twilio phone number in E.164 format (e.g. `+14155551234`). |
 | `to` | `string` | Yes | Destination phone number in E.164 format. |
 | `composedAgentId` | `string` | No | Use a multi-agent composition instead of a single agent. |
-| `dynamicVariables` | `Record<string, string>` | No | Key-value pairs injected into `\{\{mustache\}\}` placeholders in the agent's prompt. |
+| `dynamicVariables` | `Record<string, string>` | No | Key-value pairs injected into `{{mustache}}` placeholders in the agent's prompt. |
 | `metadata` | `Record<string, unknown>` | No | Arbitrary metadata attached to the call record. |
 | `agentOverride` | `object` | No | Override agent settings for this call only. See below. |
 

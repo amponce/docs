@@ -393,7 +393,7 @@ Configure retrieval behavior per-agent in the `settings.rag` field:
 |---------|---------|-------|-------------|
 | `topK` | 3 | 1-10 | Number of chunks to retrieve |
 | `threshold` | 0.7 | 0-1 | Minimum similarity score |
-| `contextTemplate` | `[RELEVANT CONTEXT]\n\{\{chunks\}\}\n[/RELEVANT CONTEXT]` | - | Template for injecting chunks |
+| `contextTemplate` | `[RELEVANT CONTEXT]\n{{chunks}}\n[/RELEVANT CONTEXT]` | - | Template for injecting chunks |
 
 <Callout type="info" title="Tip">
 You can attach up to 10 knowledge bases to a single agent using the
@@ -560,14 +560,14 @@ forge webhook deliveries if you skip verification.
 
 ## Dynamic Variables
 
-Dynamic variables let you personalize agent prompts per-call using `\{\{mustache\}\}`
+Dynamic variables let you personalize agent prompts per-call using `{{mustache}}`
 syntax. Pass variables when creating a call, and they are substituted into the
 agent's system prompt.
 
 **System prompt:**
 ```
-You are calling \{\{customerName\}\} about order \{\{orderId\}\}.
-Their plan is \{\{planType\}\}.
+You are calling {{customerName}} about order {{orderId}}.
+Their plan is {{planType}}.
 ```
 
 **Call creation:**

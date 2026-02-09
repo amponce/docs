@@ -30,7 +30,7 @@ Relay Agent supports two transfer modes:
   "transferOption": {
     "type": "warm_transfer",
     "holdMusic": "jazz",
-    "handoffPrompt": "Incoming transfer from AI support. The caller needs help with a billing dispute for account \{\{accountId\}\}. They seem frustrated.",
+    "handoffPrompt": "Incoming transfer from AI support. The caller needs help with a billing dispute for account {{accountId}}. They seem frustrated.",
     "agentDetectionTimeoutMs": 30000
   },
   "execution": {
@@ -150,7 +150,7 @@ The handoff prompt supports dynamic variables:
 ```json
 {
   "transferOption": {
-    "handoffPrompt": "Transferring \{\{callerName\}\} (account \{\{accountId\}\}). They need help with: \{\{issueDescription\}\}."
+    "handoffPrompt": "Transferring {{callerName}} (account {{accountId}}). They need help with: {{issueDescription}}."
   }
 }
 ```

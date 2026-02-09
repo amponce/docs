@@ -89,7 +89,7 @@ Attach one or more knowledge bases to an agent using the `knowledgeBaseIds` fiel
     "rag": {
       "topK": 3,
       "threshold": 0.7,
-      "contextTemplate": "[RELEVANT CONTEXT]\n\{\{chunks\}\}\n[/RELEVANT CONTEXT]"
+      "contextTemplate": "[RELEVANT CONTEXT]\n{{chunks}}\n[/RELEVANT CONTEXT]"
     }
   }
 }
@@ -105,7 +105,7 @@ Configure retrieval behavior in the `settings.rag` object:
 |-------|------|---------|-------------|
 | `topK` | `number` | `3` | Number of chunks to retrieve per turn. Range: 1-10. |
 | `threshold` | `number` | `0.7` | Minimum similarity score (0-1). Chunks below this score are excluded. |
-| `contextTemplate` | `string` | `[RELEVANT CONTEXT]\n\{\{chunks\}\}\n[/RELEVANT CONTEXT]` | Template for injecting chunks into the prompt. The `\{\{chunks\}\}` placeholder is replaced with retrieved text. Max 500 characters. |
+| `contextTemplate` | `string` | `[RELEVANT CONTEXT]\n{{chunks}}\n[/RELEVANT CONTEXT]` | Template for injecting chunks into the prompt. The `{{chunks}}` placeholder is replaced with retrieved text. Max 500 characters. |
 
 ### Tuning Retrieval
 
@@ -120,7 +120,7 @@ Configure retrieval behavior in the `settings.rag` object:
   "rag": {
     "topK": 5,
     "threshold": 0.6,
-    "contextTemplate": "Use the following information to answer the question:\n---\n\{\{chunks\}\}\n---"
+    "contextTemplate": "Use the following information to answer the question:\n---\n{{chunks}}\n---"
   }
 }
 ```

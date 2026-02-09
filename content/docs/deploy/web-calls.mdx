@@ -91,7 +91,7 @@ print(call["websocketUrl"])  # "/v1/calls/web-stream?callId=..."
 |---|---|---|---|
 | `agentId` | `string` | Yes | The agent to handle this call. |
 | `composedAgentId` | `string` | No | Use a multi-agent composition. |
-| `dynamicVariables` | `Record<string, string>` | No | Variables for `\{\{mustache\}\}` placeholders in the prompt. |
+| `dynamicVariables` | `Record<string, string>` | No | Variables for `{{mustache}}` placeholders in the prompt. |
 | `metadata` | `Record<string, unknown>` | No | Arbitrary metadata attached to the call. |
 | `agentOverride` | `object` | No | Override agent settings (systemPrompt, voice, firstMessage). |
 
