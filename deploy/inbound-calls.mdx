@@ -1,0 +1,168 @@
+---
+title: "Inbound Phone Calls"
+sidebarTitle: "Inbound Calls"
+description: "Handle incoming phone calls with AI agents via Twilio webhooks."
+---
+
+## Overview
+
+When someone calls your Twilio phone number, Relay Agent automatically answers and connects the caller to your AI agent. The agent greets the caller, listens, responds, and executes tool calls -- all without human intervention.
+
+## How It Works
+
+```
+Caller dials your number
+        |
+        v
+Twilio sends POST to /v1/webhooks/twilio/voice
+        |
+        v
+Relay Agent looks up phone number -> inbound agent
+        |
+        v
+Returns TwiML with <Connect><Stream> directive
+        |
+        v
+Twilio opens WebSocket media stream
+        |
+        v
+Agent begins conversation (STT -> LLM -> TTS)
+```
+
+<Steps>
+  <Step title="Caller dials your number">
+    A person calls the phone number you purchased or registered with Relay Agent.
+  </Step>
+  <Step title="Twilio webhook fires">
+    Twilio sends an HTTP POST to your Relay Agent webhook URL at `POST /v1/webhooks/twilio/voice` with the `CallSid`, `From`, and `To` fields.
+  </Step>
+  <Step title="Agent lookup">
+    Relay Agent looks up the called number in the phone numbers table and finds the assigned `inboundAgentId`.
+  </Step>
+  <Step title="TwiML response">
+    Relay Agent returns a TwiML XML response with a `<Connect><Stream>` directive, telling Twilio to open a bidirectional WebSocket media stream.
+  </Step>
+  <Step title="Media stream connects">
+    Twilio opens a WebSocket to `/v1/webhooks/twilio/media-stream` and begins streaming audio in both directions.
+  </Step>
+  <Step title="Conversation begins">
+    The audio pipeline starts: STT transcribes the caller's speech, the LLM generates responses, and TTS synthesizes audio back to the caller.
+  </Step>
+</Steps>
+
+## Setup
+
+### 1. Register or Provision a Phone Number
+
+You can either register an existing Twilio number or provision a new one.
+
+**Option A: Register an existing number**
+
+```bash
+curl -X POST https://your-host/v1/phone-numbers \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+14155551234",
+    "provider": "twilio",
+    "inboundAgentId": "agent_abc123def456"
+  }'
+```
+
+**Option B: Auto-provision a new number**
+
+```bash
+curl -X POST https://your-host/v1/phone-numbers/provision \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+14155551234",
+    "provider": "twilio",
+    "inboundAgentId": "agent_abc123def456"
+  }'
+```
+
+The provision endpoint performs three steps automatically:
+1. Purchases the number from Twilio
+2. Configures the Twilio voice webhook URL to point to your Relay Agent instance
+3. Creates the phone number record in your database
+
+### 2. Configure the Twilio Webhook
+
+If you registered an existing number (Option A), you need to configure Twilio to send inbound call webhooks to your Relay Agent instance.
+
+In the Twilio Console:
+1. Go to **Phone Numbers** > **Manage** > **Active Numbers**
+2. Select your phone number
+3. Under **Voice Configuration**, set the webhook URL:
+
+```
+https://your-host/v1/webhooks/twilio/voice
+```
+
+Set the HTTP method to **POST**.
+
+<Tip>
+  If you used the `/v1/phone-numbers/provision` endpoint, the webhook URL is configured automatically. No manual Twilio setup is needed.
+</Tip>
+
+### 3. Assign an Inbound Agent
+
+Make sure your phone number has an `inboundAgentId` set. You can update it at any time:
+
+```bash
+curl -X PATCH https://your-host/v1/phone-numbers/{phoneNumberId} \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inboundAgentId": "agent_abc123def456"
+  }'
+```
+
+## Error Handling
+
+If the phone number is not found or has no `inboundAgentId` assigned, the caller hears:
+
+> "This phone number is not configured. Goodbye."
+
+If the agent record is missing, the caller hears:
+
+> "Agent configuration error. Goodbye."
+
+Both cases result in the call being terminated with a `<Hangup/>` TwiML response.
+
+## Status Callbacks
+
+Twilio sends status updates to `POST /v1/webhooks/twilio/status` as the call progresses. These map to the following states:
+
+| Twilio Status | Relay Agent Status |
+|---|---|
+| `initiated` | `queued` |
+| `ringing` | `ringing` |
+| `answered` | `in-progress` |
+| `completed` | `completed` |
+| `busy` | `failed` |
+| `no-answer` | `failed` |
+| `canceled` | `failed` |
+
+## Exposing Your Local Server
+
+During development, you need to expose your local Relay Agent instance to the internet so Twilio can reach the webhook URL. Use a tunneling tool:
+
+```bash
+# Using ngrok
+ngrok http 3000
+
+# Then set the Twilio webhook URL to:
+# https://abc123.ngrok.io/v1/webhooks/twilio/voice
+```
+
+<Warning>
+  Ensure your tunnel supports WebSocket connections. Twilio media streams require a persistent WebSocket connection for audio.
+</Warning>
+
+## Next Steps
+
+- [Phone Numbers](/deploy/phone-numbers) -- Manage and provision phone numbers
+- [Outbound Calls](/deploy/phone-calls) -- Initiate outbound calls via API
+- [Webhooks](/deploy/webhooks) -- Get real-time notifications about call events

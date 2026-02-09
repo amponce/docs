@@ -1,0 +1,171 @@
+---
+title: "Memory"
+sidebarTitle: "Memory"
+description: "Enable persistent memory so your agent remembers returning callers across conversations."
+---
+
+Memory gives your agent the ability to remember information about callers across multiple calls. When a returning caller connects, the agent can reference previous conversations, preferences, and facts -- creating a personalized experience.
+
+## How It Works
+
+1. **Call ends**: After a call completes, Relay Agent summarizes the conversation and extracts key facts.
+2. **Memory stored**: The summary and facts are stored in the memory store, keyed by the caller's contact information.
+3. **Next call**: When the same caller connects again, the stored memory is retrieved and injected into the agent's context.
+4. **Agent references memory**: The LLM sees prior conversation summaries and can reference them naturally.
+
+## Configuration
+
+Enable memory in the `memory` object on your agent:
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "strategy": "per-contact",
+    "retentionDays": 90,
+    "maxTokens": 2000,
+    "autoSummarize": true
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable or disable memory for this agent. |
+| `strategy` | `string` | `"per-contact"` | How memories are scoped. See strategies below. |
+| `retentionDays` | `number` | `90` | Number of days to retain memories before expiration. |
+| `maxTokens` | `number` | `2000` | Maximum tokens for the memory context injected into the prompt. |
+| `autoSummarize` | `boolean` | `true` | Automatically summarize conversations for storage. |
+
+## Memory Strategies
+
+The `strategy` field controls how memories are scoped and matched to callers.
+
+### per-contact
+
+Memories are tied to a specific contact (identified by phone number or contact ID). Each contact has their own memory, and it is only retrieved when that specific contact calls.
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "strategy": "per-contact"
+  }
+}
+```
+
+**Use case**: Customer support where you want to remember each customer's history, preferences, and prior issues.
+
+### per-number
+
+Memories are tied to the phone number being called (your Relay Agent number), not the caller. All callers to the same number share the same memory pool.
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "strategy": "per-number"
+  }
+}
+```
+
+**Use case**: A shared reception line where you want the agent to remember general patterns (e.g., "most callers this week are asking about the product recall").
+
+### global
+
+Memories are shared across all calls for this agent, regardless of caller or number.
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "strategy": "global"
+  }
+}
+```
+
+**Use case**: An agent that needs to accumulate knowledge over time (e.g., "the last 5 callers all reported the same bug").
+
+## Memory Data Model
+
+Each memory record contains:
+
+| Field | Description |
+|-------|-------------|
+| `contactKey` | The identifier used to match the caller (phone number, contact ID). |
+| `summary` | A summarized version of past conversations. |
+| `facts` | Extracted key facts (name, preferences, account info). |
+| `callCount` | How many calls this contact has made. |
+| `lastCallAt` | When the last call occurred. |
+| `expiresAt` | When this memory expires (based on `retentionDays`). |
+
+## Auto-Summarization
+
+When `autoSummarize` is `true`, Relay Agent uses the LLM to generate a concise summary of the conversation after it ends. This summary is stored and injected into future calls.
+
+The summarization process:
+1. The full transcript is sent to the LLM with a summarization prompt.
+2. Key facts are extracted (caller name, account details, issues discussed, resolutions).
+3. The summary replaces any previous summary for this contact.
+4. Previous facts are merged with newly extracted facts.
+
+When `autoSummarize` is `false`, you manage memory manually via the API.
+
+## Token Budget
+
+The `maxTokens` setting controls how much memory context is injected into the prompt. This prevents memory from consuming too much of the LLM's context window.
+
+| maxTokens | Typical Content | Use Case |
+|-----------|-----------------|----------|
+| `500` | Brief summary, 2-3 facts | Simple recall, short calls |
+| `2000` (default) | Detailed summary, 10+ facts | Standard customer support |
+| `5000` | Multiple conversation summaries | Complex ongoing cases |
+
+<Note>
+  Memory tokens count against the LLM's context window. If your agent already has a long system prompt and knowledge base context, keep `maxTokens` on the lower end to leave room for the conversation itself.
+</Note>
+
+## Example: Returning Caller Experience
+
+**First call**:
+```
+Agent: "Hello! Thanks for calling Acme Support. How can I help?"
+Caller: "Hi, I'm Sarah. I'm having trouble with my AcmePro subscription."
+Agent: "I'd be happy to help with your subscription, Sarah. What's going on?"
+... (conversation continues, issue resolved)
+```
+
+**Memory stored**:
+```json
+{
+  "contactKey": "+15551234567",
+  "summary": "Sarah called about AcmePro subscription issues. She was unable to access premium features after renewal. Issue was resolved by refreshing her license key.",
+  "facts": ["name: Sarah", "product: AcmePro", "issue: subscription renewal", "resolution: license key refresh"],
+  "callCount": 1
+}
+```
+
+**Second call (2 weeks later)**:
+```
+Agent: "Hello! Welcome back, Sarah. Last time we helped you with your AcmePro
+        subscription renewal. Is everything working well, or is there something
+        else I can assist with?"
+Caller: "Yes, that's all fixed. I actually have a different question today..."
+```
+
+The agent naturally references the prior conversation without the caller needing to re-explain anything.
+
+## Retention and Expiration
+
+Memories expire after `retentionDays`. Expired memories are automatically cleaned up and no longer injected into future calls.
+
+| retentionDays | Use Case |
+|---------------|----------|
+| `7` | Short-term memory for active campaigns |
+| `30` | Monthly service interactions |
+| `90` (default) | Standard customer relationships |
+| `365` | Long-term client relationships |
+
+<Warning>
+  Memory stores personal information from conversations. Ensure your retention policy complies with your privacy requirements and data regulations. Shorter retention periods reduce data exposure.
+</Warning>

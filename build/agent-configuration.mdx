@@ -1,0 +1,270 @@
+---
+title: "Agent Configuration"
+sidebarTitle: "Agent Configuration"
+description: "Complete guide to creating and configuring voice AI agents with all available fields and settings."
+---
+
+An agent is the core building block of Relay Agent. It defines the AI personality, voice, language model, transcription settings, tools, and behavior for a voice conversation.
+
+## Creating an Agent
+
+Create an agent by sending a `POST` request to `/v1/agents` with a JSON body containing the agent configuration.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.relay-agent.com/v1/agents \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Support Agent",
+    "model": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "temperature": 0.7,
+      "maxTokens": 1024,
+      "systemPrompt": "You are a helpful customer support agent for Acme Corp. Be concise and friendly."
+    },
+    "voice": {
+      "provider": "elevenlabs",
+      "voiceId": "21m00Tcm4TlvDq8ikWAM",
+      "speed": 1.0,
+      "stability": 0.5
+    },
+    "transcriber": {
+      "provider": "deepgram",
+      "model": "nova-2",
+      "language": "en-US",
+      "keywords": ["Acme", "AcmePro"]
+    },
+    "firstMessage": "Hello! Thanks for calling Acme Corp. How can I help you today?",
+    "settings": {
+      "responsiveness": 0.8,
+      "interruptionSensitivity": 0.7,
+      "backchanneling": true,
+      "endCallAfterSilenceMs": 30000,
+      "maxCallDurationMs": 1800000,
+      "ambientSound": "office",
+      "language": "en-US"
+    }
+  }'
+```
+
+```typescript SDK
+import RelayAgent from '@relay-agent/sdk';
+
+const client = new RelayAgent({ apiKey: 'YOUR_API_KEY' });
+
+const agent = await client.agents.create({
+  name: 'Support Agent',
+  model: {
+    provider: 'openai',
+    model: 'gpt-4o-mini',
+    temperature: 0.7,
+    maxTokens: 1024,
+    systemPrompt: 'You are a helpful customer support agent for Acme Corp. Be concise and friendly.',
+  },
+  voice: {
+    provider: 'elevenlabs',
+    voiceId: '21m00Tcm4TlvDq8ikWAM',
+    speed: 1.0,
+    stability: 0.5,
+  },
+  transcriber: {
+    provider: 'deepgram',
+    model: 'nova-2',
+    language: 'en-US',
+    keywords: ['Acme', 'AcmePro'],
+  },
+  firstMessage: 'Hello! Thanks for calling Acme Corp. How can I help you today?',
+  settings: {
+    responsiveness: 0.8,
+    interruptionSensitivity: 0.7,
+    backchanneling: true,
+    endCallAfterSilenceMs: 30000,
+    maxCallDurationMs: 1800000,
+    ambientSound: 'office',
+    language: 'en-US',
+  },
+});
+```
+</CodeGroup>
+
+## Full Agent Schema
+
+Below is a complete agent configuration with every available field.
+
+```json
+{
+  "name": "Full Example Agent",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "temperature": 0.7,
+    "maxTokens": 1024,
+    "systemPrompt": "You are a professional receptionist for {{companyName}}."
+  },
+  "voice": {
+    "provider": "elevenlabs",
+    "voiceId": "21m00Tcm4TlvDq8ikWAM",
+    "model": "eleven_turbo_v2_5",
+    "speed": 1.0,
+    "stability": 0.5
+  },
+  "transcriber": {
+    "provider": "deepgram",
+    "model": "nova-2",
+    "language": "en-US",
+    "keywords": ["Acme", "AcmePro"]
+  },
+  "firstMessage": "Hello! Thanks for calling {{companyName}}. How can I help you?",
+  "firstMessageDelay": 500,
+  "settings": {
+    "responsiveness": 0.8,
+    "interruptionSensitivity": 0.7,
+    "backchanneling": true,
+    "backchannelingWords": ["mm-hmm", "I see", "got it"],
+    "endCallAfterSilenceMs": 30000,
+    "maxCallDurationMs": 3600000,
+    "voicemailDetection": false,
+    "voicemailMessage": "Hi, this is an AI assistant calling on behalf of Acme Corp. Please call us back.",
+    "ambientSound": "office",
+    "language": "en-US",
+    "speechNormalization": true,
+    "denoising": "none",
+    "turnDetection": {
+      "mode": "greedy",
+      "endpointingMs": 300,
+      "utteranceEndMs": 1000,
+      "greedyCommitOnFirstAudio": true,
+      "maxRestarts": 3
+    },
+    "rag": {
+      "topK": 3,
+      "threshold": 0.7,
+      "contextTemplate": "[RELEVANT CONTEXT]\n{{chunks}}\n[/RELEVANT CONTEXT]"
+    }
+  },
+  "endpointDetection": {
+    "mode": "fixed",
+    "minSilenceMs": 500,
+    "semanticCompletion": false,
+    "utterancePrediction": false
+  },
+  "tools": [],
+  "serverUrl": "https://your-server.com/webhook",
+  "postCallAnalysis": [
+    {
+      "name": "call_outcome",
+      "type": "enum",
+      "description": "The outcome of the call",
+      "choices": ["resolved", "escalated", "abandoned", "callback_scheduled"]
+    }
+  ],
+  "memory": {
+    "enabled": true,
+    "strategy": "per-contact",
+    "retentionDays": 90,
+    "maxTokens": 2000,
+    "autoSummarize": true
+  },
+  "pronunciationDictionary": [
+    { "word": "Acme", "alphabet": "ipa", "phoneme": "\u00e6kmi" }
+  ],
+  "knowledgeBaseIds": ["kb_abc123"],
+  "metadata": {
+    "team": "support",
+    "environment": "production"
+  }
+}
+```
+
+## Top-Level Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | Display name for the agent. 1-200 characters. |
+| `model` | `object` | Yes | LLM configuration. See [Models](/build/models). |
+| `voice` | `object` | Yes | TTS voice configuration. See [Voices](/build/voices). |
+| `transcriber` | `object` | No | STT configuration. Defaults to Deepgram nova-2 en-US. See [Transcription](/build/transcription). |
+| `firstMessage` | `string` | No | The greeting the agent speaks when the call connects. Supports `{{variables}}`. |
+| `firstMessageDelay` | `number` | No | Milliseconds to wait before speaking the first message. 0-5000. |
+| `settings` | `object` | No | Behavior and audio settings. See below. |
+| `endpointDetection` | `object` | No | Advanced endpoint detection config. |
+| `tools` | `array` | No | Function calling tools. See [Tools](/build/tools). |
+| `serverUrl` | `string` | No | Default webhook URL for tool execution. |
+| `postCallAnalysis` | `array` | No | Fields to extract after the call. See [Post-Call Analysis](/build/post-call-analysis). |
+| `memory` | `object` | No | Cross-call memory config. See [Memory](/build/memory). |
+| `pronunciationDictionary` | `array` | No | Custom pronunciation entries using IPA or CMU phonemes. |
+| `knowledgeBaseId` | `string` | No | Single knowledge base ID (legacy, use `knowledgeBaseIds`). |
+| `knowledgeBaseIds` | `string[]` | No | Array of knowledge base IDs (max 10). See [Knowledge Bases](/build/knowledge-bases). |
+| `metadata` | `object` | No | Arbitrary key-value metadata for your own use. |
+
+## Settings Reference
+
+The `settings` object controls the agent's conversational behavior.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `responsiveness` | `number` | `0.8` | How quickly the agent responds. 0 = deliberate, 1 = instant. |
+| `interruptionSensitivity` | `number` | `0.7` | Sensitivity to user interruptions. 0 = never interrupted, 1 = very sensitive. |
+| `backchanneling` | `boolean` | `false` | Enable filler words like "mm-hmm" and "I see" while the user speaks. |
+| `backchannelingWords` | `string[]` | - | Custom backchannel words. Only used when `backchanneling` is `true`. |
+| `endCallAfterSilenceMs` | `number` | `30000` | End the call after this many ms of silence (30s default). |
+| `maxCallDurationMs` | `number` | `3600000` | Hard limit on call duration in ms (1 hour default). |
+| `voicemailDetection` | `boolean` | `false` | Detect voicemail greetings and leave a message. |
+| `voicemailMessage` | `string` | - | Message to leave on voicemail. Required if `voicemailDetection` is true. |
+| `ambientSound` | `string` | `"none"` | Background sound. Options: `none`, `office`, `call-center`, `cafe`. |
+| `language` | `string` | `"en-US"` | Primary language BCP-47 code. |
+| `speechNormalization` | `boolean` | `true` | Normalize speech volume levels. |
+| `denoising` | `string` | `"none"` | Noise reduction. Options: `none`, `noise-cancel`, `full`. |
+| `turnDetection` | `object` | - | Turn detection settings. See [Turn Detection](/build/turn-detection). |
+| `rag` | `object` | - | RAG retrieval settings. See [Knowledge Bases](/build/knowledge-bases). |
+
+## Model Object
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | `string` | Yes | LLM provider: `openai`, `anthropic`, `google`, `groq`, `together`. |
+| `model` | `string` | Yes | Model identifier (e.g., `gpt-4o-mini`, `claude-3-haiku-20240307`). |
+| `temperature` | `number` | No | Sampling temperature. 0-2. |
+| `maxTokens` | `number` | No | Maximum tokens in the response. |
+| `systemPrompt` | `string` | Yes | The system prompt that defines agent behavior. Supports `{{variables}}`. |
+
+## Voice Object
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | `string` | Yes | TTS provider: `elevenlabs`, `openai`, `playht`, `deepgram`, `cartesia`. |
+| `voiceId` | `string` | Yes | Provider-specific voice identifier. |
+| `model` | `string` | No | TTS model (e.g., `eleven_turbo_v2_5`). |
+| `speed` | `number` | No | Speech speed multiplier. 0.5-2.0. |
+| `stability` | `number` | No | Voice stability. 0-1. Higher = more consistent, lower = more expressive. |
+
+## Transcriber Object
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | `string` | Yes | STT provider: `deepgram`, `assemblyai`, `google`, `openai`, `azure`. |
+| `model` | `string` | No | STT model (e.g., `nova-2`). |
+| `language` | `string` | No | BCP-47 language code. Default: `en-US`. |
+| `keywords` | `string[]` | No | Words to boost for better recognition (product names, jargon). |
+
+## Updating an Agent
+
+Update any fields on an existing agent with a `PATCH` request. All fields are optional -- only include what you want to change.
+
+```bash
+curl -X PATCH https://api.relay-agent.com/v1/agents/agent_abc123 \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firstMessage": "Welcome to Acme! What can I do for you?",
+    "settings": {
+      "backchanneling": true
+    }
+  }'
+```
+
+<Note>
+  Updating an agent increments its version number. You can view version history at `GET /v1/agents/:id/versions` and roll back if needed.
+</Note>

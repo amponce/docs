@@ -1,0 +1,173 @@
+---
+title: "Profile"
+sidebarTitle: "Profile"
+description: "Manage your user account, update personal information, and change your password"
+---
+
+## Your Profile
+
+Your profile is your personal identity across all workspaces. It includes your name, email address, and optional avatar. Profile information is visible to other members of your workspaces.
+
+```bash Get your profile
+curl https://api.relayagent.com/console/profile \
+  -b "relay_session=rs_..."
+```
+
+```json Response
+{
+  "id": "user_abc123",
+  "email": "jane@example.com",
+  "name": "Jane Smith",
+  "avatarUrl": null
+}
+```
+
+## Updating Your Profile
+
+You can update your display name and avatar URL at any time. Email addresses cannot be changed through this endpoint.
+
+```bash Update profile
+curl -X PATCH https://api.relayagent.com/console/profile \
+  -H "Content-Type: application/json" \
+  -b "relay_session=rs_..." \
+  -d '{
+    "name": "Jane M. Smith",
+    "avatarUrl": "https://example.com/avatars/jane.jpg"
+  }'
+```
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `name` | string | 1-200 characters |
+| `avatarUrl` | string or null | Must be a valid URL, or `null` to remove |
+
+Both fields are optional. Only include the fields you want to change.
+
+## Changing Your Password
+
+Password changes require your current password for verification:
+
+```bash Change password
+curl -X POST https://api.relayagent.com/console/profile/change-password \
+  -H "Content-Type: application/json" \
+  -b "relay_session=rs_..." \
+  -d '{
+    "currentPassword": "your-current-password",
+    "newPassword": "your-new-secure-password"
+  }'
+```
+
+Returns `204 No Content` on success.
+
+| Field | Rules |
+|-------|-------|
+| `currentPassword` | Must match your existing password |
+| `newPassword` | Minimum 8 characters, maximum 128 characters |
+
+<Warning>
+If you enter the wrong current password, the API returns a `400` error with the message "Current password is incorrect." Existing sessions remain valid after a password change.
+</Warning>
+
+## Registration
+
+New accounts are created through the registration endpoint. Registration automatically creates a user account, a default workspace, and an admin membership.
+
+```bash Register a new account
+curl -X POST https://api.relayagent.com/console/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "jane@example.com",
+    "password": "secure-password-here",
+    "name": "Jane Smith"
+  }'
+```
+
+| Field | Rules |
+|-------|-------|
+| `email` | Valid email, max 320 characters, must be unique |
+| `password` | 8-128 characters |
+| `name` | 1-200 characters |
+
+The registration flow creates:
+1. A new user with a bcrypt-hashed password
+2. A default workspace named `{name}'s Workspace` with a URL-safe slug
+3. An admin membership linking the user to the workspace
+4. An active session (cookie set automatically)
+
+If the email is already registered, the API returns `409 Conflict`.
+
+## Login and Logout
+
+### Login
+
+```bash Login
+curl -X POST https://api.relayagent.com/console/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "jane@example.com",
+    "password": "your-password"
+  }'
+```
+
+On success, a `relay_session` cookie is set and the response includes your user profile plus all workspaces you belong to:
+
+```json Response
+{
+  "user": {
+    "id": "user_abc123",
+    "email": "jane@example.com",
+    "name": "Jane Smith",
+    "avatarUrl": null
+  },
+  "orgs": [
+    { "id": "org_xyz", "name": "Acme Corp", "slug": "acme-corp", "role": "admin" },
+    { "id": "org_abc", "name": "Side Project", "slug": "side-project", "role": "developer" }
+  ],
+  "activeOrg": { "id": "org_xyz", "name": "Acme Corp", "slug": "acme-corp", "role": "admin" }
+}
+```
+
+### Logout
+
+```bash Logout
+curl -X POST https://api.relayagent.com/console/auth/logout \
+  -b "relay_session=rs_..."
+```
+
+Returns `204 No Content`. The session is deleted server-side and the cookie is cleared.
+
+## Session Management
+
+Relay Agent uses server-side sessions with secure cookies for console authentication.
+
+| Property | Value |
+|----------|-------|
+| Cookie name | `relay_session` |
+| Max age | **7 days** |
+| HttpOnly | Yes (not accessible from JavaScript) |
+| Secure | Yes in production (HTTPS only) |
+| SameSite | Strict |
+| Sliding window | Session extended by 7 days when less than 1 day remains |
+
+<Note>
+Sessions use a **sliding window** expiry. If you use the console regularly, your session renews automatically. You are only logged out after 7 consecutive days of inactivity.
+</Note>
+
+### How Sessions Work
+
+1. On login or registration, a cryptographically random session token (`rs_...`) is generated
+2. A salted SHA-256 hash of the token is stored in the database
+3. The plaintext token is set as an `httpOnly` cookie
+4. On each request, the cookie is hashed and looked up against the sessions table
+5. The session resolves the user ID and active workspace, which scope all subsequent operations
+
+### Getting Current Session Info
+
+The `/console/auth/me` endpoint returns your current user, all workspaces, and the active workspace:
+
+```bash Get current session
+curl https://api.relayagent.com/console/auth/me \
+  -b "relay_session=rs_..."
+```
+
+This is typically called on page load to check if the user has an active session and to populate the workspace switcher.

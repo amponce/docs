@@ -1,0 +1,228 @@
+---
+title: "API Keys"
+sidebarTitle: "API Keys"
+description: "Create, manage, and use API keys to authenticate programmatic access to the Relay Agent API"
+---
+
+API keys are the primary authentication method for the Relay Agent REST API. Every API call you make from your backend, SDK, or scripts requires a valid API key.
+
+## Creating API Keys
+
+<Warning>
+Only workspace **admins** can create API keys. Developers can view existing keys but cannot create or revoke them.
+</Warning>
+
+### Via the Console UI
+
+1. Navigate to **Settings > API Keys** in the console
+2. Click **Create API Key**
+3. Give the key a descriptive name (e.g., `production-backend`, `staging-server`, `local-dev`)
+4. Copy the key immediately -- it is shown **only once**
+
+### Via the API
+
+```bash Create an API key
+curl -X POST https://api.relayagent.com/console/api-keys \
+  -H "Content-Type: application/json" \
+  -b "relay_session=rs_..." \
+  -d '{"name": "production-backend"}'
+```
+
+```json Response (201 Created)
+{
+  "id": "apikey_abc123",
+  "key": "ra_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789ABCD",
+  "name": "production-backend",
+  "createdAt": "2026-02-08T10:30:00.000Z"
+}
+```
+
+<Warning>
+The `key` field in the response is the **only time** the full API key is returned. Relay Agent stores a salted SHA-256 hash of the key -- the plaintext cannot be retrieved later. If you lose it, revoke the key and create a new one.
+</Warning>
+
+## Key Format
+
+All Relay Agent API keys follow a consistent format:
+
+```
+ra_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789ABCD
+^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+|   base64url-encoded 32 random bytes
+|
+prefix (identifies this as a Relay Agent key)
+```
+
+The `ra_` prefix makes it easy to identify Relay Agent keys in code, logs, and secret scanners.
+
+## Using API Keys
+
+Include your API key in the `Authorization` header of every API request:
+
+<CodeGroup>
+```bash cURL
+curl https://api.relayagent.com/v1/agents \
+  -H "Authorization: Bearer ra_aBcDeFgHiJkLmNoPqRsTuVwXyZ..."
+```
+
+```typescript TypeScript
+const response = await fetch('https://api.relayagent.com/v1/agents', {
+  headers: {
+    'Authorization': `Bearer ${process.env.RELAY_AGENT_API_KEY}`,
+    'Content-Type': 'application/json',
+  },
+});
+const { data } = await response.json();
+```
+
+```python Python
+import os
+import requests
+
+response = requests.get(
+    "https://api.relayagent.com/v1/agents",
+    headers={
+        "Authorization": f"Bearer {os.environ['RELAY_AGENT_API_KEY']}",
+        "Content-Type": "application/json",
+    },
+)
+data = response.json()["data"]
+```
+</CodeGroup>
+
+<Tip>
+The SDK handles authentication automatically. Just pass the key when initializing the client:
+
+```typescript
+import { RelayAgent } from '@relay-agent/sdk';
+
+const client = new RelayAgent({ apiKey: process.env.RELAY_AGENT_API_KEY });
+```
+</Tip>
+
+## Environment Variable Setup
+
+Store your API key in a `.env` file and load it at runtime. Never hardcode keys in source files.
+
+```bash .env
+RELAY_AGENT_API_KEY=ra_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789ABCD
+```
+
+```bash .env.example (commit this, not .env)
+RELAY_AGENT_API_KEY=
+```
+
+<CodeGroup>
+```typescript Node.js (dotenv)
+import 'dotenv/config';
+
+// process.env.RELAY_AGENT_API_KEY is now available
+```
+
+```python Python (python-dotenv)
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+api_key = os.environ["RELAY_AGENT_API_KEY"]
+```
+</CodeGroup>
+
+## Workspace Scoping
+
+Every API key is bound to the workspace that created it. When you authenticate with an API key, **all API calls are automatically scoped to that workspace**:
+
+- `GET /v1/agents` returns only agents belonging to the key's workspace
+- `POST /v1/calls/phone` creates a call within the key's workspace
+- Usage, billing, and logs are all attributed to the key's workspace
+
+There is no way to access another workspace's resources using a given API key. This is enforced at the authentication layer before any route handler executes.
+
+```
+API Key (ra_...)  -->  Resolves to org_xyz  -->  All queries filtered by org_xyz
+```
+
+A single workspace can have multiple active API keys. All keys for a workspace share the same access scope -- there is no per-key permission model. Use separate keys to distinguish environments (production, staging, development) or services.
+
+## Listing API Keys
+
+Admins and developers can list all active (non-revoked) API keys for the current workspace. Key values are never returned in list responses -- only metadata.
+
+```bash List API keys
+curl https://api.relayagent.com/console/api-keys \
+  -b "relay_session=rs_..."
+```
+
+```json Response
+{
+  "data": [
+    {
+      "id": "apikey_abc123",
+      "name": "production-backend",
+      "createdAt": "2026-01-15T10:30:00.000Z",
+      "revokedAt": null
+    },
+    {
+      "id": "apikey_def456",
+      "name": "staging-server",
+      "createdAt": "2026-02-01T14:00:00.000Z",
+      "revokedAt": null
+    }
+  ]
+}
+```
+
+## Revoking API Keys
+
+Admins can revoke an API key at any time. Revocation is a **soft delete** -- the key record is retained with a `revokedAt` timestamp, but any request using the revoked key will immediately fail with `401 Unauthorized`.
+
+```bash Revoke an API key
+curl -X DELETE https://api.relayagent.com/console/api-keys/apikey_abc123 \
+  -b "relay_session=rs_..."
+```
+
+This returns `204 No Content`. The key is invalidated immediately and does not appear in future list responses.
+
+<Note>
+Revocation is permanent. A revoked key cannot be re-enabled. Create a new key if you need to replace a revoked one.
+</Note>
+
+## Security Best Practices
+
+<Warning>
+API keys grant full access to your workspace. Treat them like passwords.
+</Warning>
+
+**Do:**
+- Store keys in environment variables or a secrets manager (AWS Secrets Manager, HashiCorp Vault, Doppler)
+- Use different keys for production, staging, and development environments
+- Rotate keys periodically -- create a new key, update your services, then revoke the old one
+- Add `ra_*` patterns to your `.gitignore` and secret scanning tools
+- Revoke keys immediately if you suspect they have been compromised
+
+**Do not:**
+- Commit API keys to version control
+- Share keys over unencrypted channels (email, Slack messages, etc.)
+- Expose keys in client-side code (browser JavaScript, mobile apps)
+- Log full API key values -- log only the key ID if you need to track usage
+
+## Quick Reference
+
+| Endpoint | Method | Role Required | Description |
+|----------|--------|---------------|-------------|
+| `/console/api-keys` | `GET` | Admin, Developer | List active keys (metadata only) |
+| `/console/api-keys` | `POST` | Admin | Create a new key (returns plaintext once) |
+| `/console/api-keys/:id` | `DELETE` | Admin | Revoke a key (soft delete) |
+
+## Troubleshooting
+
+**`401 Unauthorized` on every request**
+- Verify the key starts with `ra_` and is complete (no truncation from copy/paste)
+- Check that the key has not been revoked in the console
+- Ensure the `Authorization` header format is exactly `Bearer ra_...` with a single space
+
+**`403 Forbidden` when creating keys**
+- Only admins can create and revoke API keys. Ask a workspace admin to create one for you, or have your role changed to admin.
+
+**Key not working after workspace switch**
+- API keys are tied to a specific workspace. If you switched workspaces in the console, your existing keys still point to the original workspace. Create a new key in the target workspace.

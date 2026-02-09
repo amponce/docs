@@ -1,0 +1,252 @@
+---
+title: "DevTools"
+sidebarTitle: "DevTools"
+description: "Inspect live calls in real time with WebSocket-based event streaming and debugging tools."
+---
+
+## Overview
+
+DevTools provides real-time visibility into active calls. Connect via WebSocket to see every stage of the audio pipeline as it happens -- STT transcription, LLM token generation, TTS synthesis, tool calls, latency metrics, and more. It is designed for debugging latency issues, monitoring live conversations, and building custom dashboards.
+
+## WebSocket: Live Event Streaming
+
+### Connect
+
+```
+GET /v1/calls/{callId}/inspect
+```
+
+Upgrade to a WebSocket connection. Requires authentication via the `Authorization` header or query parameter.
+
+```typescript
+const callId = "call_xYzAbCdEf123456789012";
+const ws = new WebSocket(
+  `wss://your-host/v1/calls/${callId}/inspect`,
+  {
+    headers: {
+      "Authorization": "Bearer ra_your_api_key",
+    },
+  }
+);
+
+ws.onopen = () => {
+  console.log("Inspector connected");
+};
+
+ws.onmessage = (event) => {
+  const inspectorEvent = JSON.parse(event.data);
+  console.log(`[${inspectorEvent.type}]`, inspectorEvent.data);
+};
+
+ws.onclose = (event) => {
+  console.log("Inspector disconnected:", event.code, event.reason);
+};
+```
+
+### Event Replay
+
+On connection, the last 50 events from the circular buffer are automatically replayed to bring you up to speed with the current call state. The buffer holds up to 1,000 events.
+
+### Close Codes
+
+| Code | Meaning |
+|---|---|
+| `4004` | Call not found, or no active inspector for this call. |
+| `1001` | Call ended and inspector was disposed. |
+| `1013` | Inspector has already been disposed. |
+
+## Event Types
+
+Every event follows this structure:
+
+```json
+{
+  "timestamp": "2026-02-08T12:00:05.123Z",
+  "callId": "call_xYzAbCdEf123456789012",
+  "type": "stt_final",
+  "data": { ... }
+}
+```
+
+### Audio Pipeline Events
+
+| Event | Description | Key Data Fields |
+|---|---|---|
+| `state_change` | Pipeline stage changed. | `from`, `to` (idle, listening, thinking, speaking) |
+| `stt_partial` | Partial speech-to-text transcript. | `text` |
+| `stt_final` | Final speech-to-text transcript. | `text`, `confidence` |
+| `llm_start` | LLM generation started. | - |
+| `llm_token` | LLM token received (streaming). | `token` |
+| `llm_tool_call` | LLM invoked a tool/function. | `toolName`, `arguments` |
+| `llm_complete` | LLM generation completed. | `text`, `model`, `tokensUsed` |
+| `tts_start` | TTS synthesis started for a text chunk. | `text` |
+| `tts_chunk` | TTS audio chunk sent to caller. | `durationMs` |
+| `tts_complete` | TTS finished speaking. | - |
+
+### Interaction Events
+
+| Event | Description | Key Data Fields |
+|---|---|---|
+| `interruption` | User interrupted the agent while speaking. | `partialResponse` |
+| `transfer` | Call transferred to another agent/number. | `target`, `type` |
+| `whisper` | Context was whispered to the agent. | `message` |
+
+### Diagnostic Events
+
+| Event | Description | Key Data Fields |
+|---|---|---|
+| `latency` | End-of-turn latency metrics. | `sttMs`, `llmFirstTokenMs`, `ttsFirstChunkMs`, `totalMs` |
+| `error` | Error in any pipeline stage. | `message`, `stage` |
+
+## Client Control Messages
+
+Send JSON messages to the WebSocket to control what events you receive.
+
+### Filter Events
+
+Only receive specific event types:
+
+```json
+{ "filter": ["stt_final", "llm_complete", "latency"] }
+```
+
+Clear the filter to receive all events:
+
+```json
+{ "filter": [] }
+```
+
+### Pause/Resume
+
+Temporarily stop receiving events (the buffer continues to fill):
+
+```json
+{ "pause": true }
+```
+
+Resume:
+
+```json
+{ "pause": false }
+```
+
+## REST: Query Buffered Events
+
+For non-WebSocket clients, query the event buffer via REST:
+
+```bash
+curl "https://your-host/v1/calls/{callId}/events?type=stt_final,latency&limit=50" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `type` | `string` | Comma-separated event types to filter. |
+| `limit` | `number` | Maximum events to return (from most recent). |
+| `since` | `string` | ISO 8601 timestamp. Only return events after this time. |
+
+### Response
+
+```json
+{
+  "callId": "call_xYzAbCdEf123456789012",
+  "count": 15,
+  "events": [
+    {
+      "timestamp": "2026-02-08T12:00:05.123Z",
+      "callId": "call_xYzAbCdEf123456789012",
+      "type": "latency",
+      "data": {
+        "sttMs": 120,
+        "llmFirstTokenMs": 280,
+        "ttsFirstChunkMs": 95,
+        "totalMs": 495
+      }
+    }
+  ]
+}
+```
+
+## Complete Debugging Example
+
+Here is a Node.js script that connects to a live call and logs a readable timeline:
+
+```typescript
+import WebSocket from "ws";
+
+const API_KEY = "ra_your_api_key";
+const HOST = "your-host";
+const CALL_ID = "call_xYzAbCdEf123456789012";
+
+const ws = new WebSocket(
+  `wss://${HOST}/v1/calls/${CALL_ID}/inspect`,
+  { headers: { Authorization: `Bearer ${API_KEY}` } }
+);
+
+ws.on("open", () => {
+  console.log("Connected to DevTools inspector\n");
+
+  // Only show the events we care about
+  ws.send(JSON.stringify({
+    filter: ["stt_final", "llm_start", "llm_complete", "tts_start", "latency", "error"],
+  }));
+});
+
+ws.on("message", (raw) => {
+  const event = JSON.parse(raw.toString());
+  const time = new Date(event.timestamp).toLocaleTimeString();
+
+  switch (event.type) {
+    case "stt_final":
+      console.log(`${time}  [USER]    ${event.data.text}`);
+      break;
+    case "llm_start":
+      console.log(`${time}  [LLM]     Thinking...`);
+      break;
+    case "llm_complete":
+      console.log(`${time}  [AGENT]   ${event.data.text}`);
+      break;
+    case "tts_start":
+      console.log(`${time}  [TTS]     Speaking: "${event.data.text}"`);
+      break;
+    case "latency":
+      const d = event.data;
+      console.log(
+        `${time}  [LATENCY] STT: ${d.sttMs}ms | LLM: ${d.llmFirstTokenMs}ms | TTS: ${d.ttsFirstChunkMs}ms | Total: ${d.totalMs}ms`
+      );
+      break;
+    case "error":
+      console.log(`${time}  [ERROR]   ${event.data.stage}: ${event.data.message}`);
+      break;
+  }
+});
+
+ws.on("close", (code, reason) => {
+  console.log(`\nDisconnected: ${code} ${reason}`);
+});
+```
+
+### Example Output
+
+```
+Connected to DevTools inspector
+
+12:00:05 PM  [USER]    Hi, I need help with my account.
+12:00:05 PM  [LLM]     Thinking...
+12:00:06 PM  [AGENT]   Of course! I'd be happy to help you with your account. Could you tell me your account number?
+12:00:06 PM  [TTS]     Speaking: "Of course! I'd be happy to help you with your account."
+12:00:06 PM  [TTS]     Speaking: "Could you tell me your account number?"
+12:00:07 PM  [LATENCY] STT: 120ms | LLM: 280ms | TTS: 95ms | Total: 495ms
+```
+
+<Note>
+  The inspector is only available for active calls. Once a call ends, the inspector is disposed and the WebSocket closes with code `1001`. Use the REST events endpoint to query buffered events for recently ended calls, but note that the buffer is cleared when the inspector is disposed.
+</Note>
+
+## Next Steps
+
+- [Latency](/monitor/latency) -- Understand latency metrics and optimize performance
+- [Call History](/monitor/call-history) -- Query past calls and transcripts
+- [Webhooks](/deploy/webhooks) -- Get event notifications on your server

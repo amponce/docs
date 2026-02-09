@@ -1,0 +1,181 @@
+---
+title: "Workspaces"
+sidebarTitle: "Workspaces"
+description: "Multi-tenant workspace management for organizing teams, agents, and billing"
+---
+
+## What is a Workspace?
+
+A workspace is the top-level organizational unit in Relay Agent. Every resource you create -- agents, calls, knowledge bases, campaigns, API keys -- belongs to a single workspace. Workspaces provide **complete data isolation**: members of one workspace can never access resources belonging to another.
+
+Think of workspaces as separate organizations or projects. A single user account can belong to multiple workspaces and switch between them freely.
+
+<Note>
+Workspaces map to the `organizations` table internally. The terms "workspace" and "organization" are used interchangeably in the API, but the console UI always refers to them as **workspaces**.
+</Note>
+
+## Automatic Creation on Registration
+
+When you register a new account, Relay Agent automatically creates:
+
+1. Your **user account**
+2. A **default workspace** named `{your name}'s Workspace`
+3. An **admin membership** linking you to that workspace
+
+You are immediately signed in and set to the new workspace. No additional setup is required.
+
+```json Response from POST /console/auth/register
+{
+  "user": {
+    "id": "user_abc123",
+    "email": "you@example.com",
+    "name": "Jane Smith",
+    "avatarUrl": null
+  },
+  "org": {
+    "id": "org_xyz789",
+    "name": "Jane Smith's Workspace",
+    "slug": "jane-smith",
+    "role": "admin"
+  }
+}
+```
+
+## Workspace Settings
+
+Each workspace has two configurable properties:
+
+| Property | Rules | Example |
+|----------|-------|---------|
+| **Name** | 1-200 characters | `Acme Corp` |
+| **Slug** | 2-100 characters, lowercase alphanumeric with hyphens, must start and end with a letter or number | `acme-corp` |
+
+Slugs must be globally unique. If your chosen slug is taken, the API returns a `409 Conflict` error.
+
+<CodeGroup>
+```bash Update workspace name
+curl -X PATCH https://api.relayagent.com/console/workspace \
+  -H "Content-Type: application/json" \
+  -b "relay_session=rs_..." \
+  -d '{"name": "Acme Corp", "slug": "acme-corp"}'
+```
+
+```json Response
+{
+  "id": "org_xyz789",
+  "name": "Acme Corp",
+  "slug": "acme-corp",
+  "plan": "free",
+  "limits": {
+    "maxConcurrentCalls": 5,
+    "maxMembers": 3,
+    "maxApiKeys": 5
+  }
+}
+```
+</CodeGroup>
+
+<Warning>
+Only workspace **admins** can update workspace settings. Developers and members will receive a `403 Forbidden` error.
+</Warning>
+
+## Plans and Limits
+
+Every workspace has a plan that determines its resource limits.
+
+| Plan | Concurrent Calls | Team Members | API Keys |
+|------|:-:|:-:|:-:|
+| **Free** | 5 | 3 | 5 |
+| **Pro** | 50 | 25 | 50 |
+| **Enterprise** | Custom | Unlimited | Unlimited |
+
+These limits are stored in the workspace's `limits` object and enforced across all API operations:
+
+```json
+{
+  "limits": {
+    "maxConcurrentCalls": 5,
+    "maxMembers": 3,
+    "maxApiKeys": 5
+  }
+}
+```
+
+<Tip>
+Plan upgrades are managed through the billing page in the console. Contact sales for enterprise plans with custom limits.
+</Tip>
+
+## Creating Additional Workspaces
+
+Any authenticated user can create additional workspaces. The creating user is automatically granted the **admin** role in the new workspace and their active session switches to it.
+
+```bash Create a new workspace
+curl -X POST https://api.relayagent.com/console/auth/create-workspace \
+  -H "Content-Type: application/json" \
+  -b "relay_session=rs_..." \
+  -d '{"name": "My Second Project"}'
+```
+
+## Switching Between Workspaces
+
+If you belong to multiple workspaces, you can switch your active workspace at any time. This updates your current session -- all subsequent API calls through the console will operate against the selected workspace.
+
+```bash Switch active workspace
+curl -X POST https://api.relayagent.com/console/auth/switch-org \
+  -H "Content-Type: application/json" \
+  -b "relay_session=rs_..." \
+  -d '{"orgId": "org_abc123"}'
+```
+
+The `GET /console/auth/me` endpoint returns all workspaces you belong to along with your role in each:
+
+```json
+{
+  "user": { "id": "user_abc", "email": "you@example.com", "name": "Jane" },
+  "orgs": [
+    { "id": "org_xyz", "name": "Acme Corp", "slug": "acme-corp", "role": "admin" },
+    { "id": "org_abc", "name": "Side Project", "slug": "side-project", "role": "developer" }
+  ],
+  "activeOrg": { "id": "org_xyz", "name": "Acme Corp", "slug": "acme-corp", "role": "admin" }
+}
+```
+
+## Data Isolation
+
+Workspaces provide strict tenant isolation:
+
+- **Agents** created in Workspace A are invisible to Workspace B
+- **API keys** are scoped to their workspace -- a key from Workspace A cannot access Workspace B resources
+- **Call logs**, **campaigns**, **knowledge bases**, and **usage data** are all partitioned by workspace
+- **Team members** can have different roles in different workspaces (admin in one, member in another)
+
+Every authenticated request -- whether via API key or console session -- includes a resolved `orgId` that scopes all database queries to a single workspace.
+
+<Note>
+There is no "super admin" or cross-workspace access. Even if you own multiple workspaces, each workspace is a completely separate data silo.
+</Note>
+
+## Viewing Workspace Details
+
+Any authenticated member can view the current workspace's details, regardless of their role.
+
+```bash Get current workspace
+curl https://api.relayagent.com/console/workspace \
+  -b "relay_session=rs_..."
+```
+
+```json Response
+{
+  "id": "org_xyz789",
+  "name": "Acme Corp",
+  "slug": "acme-corp",
+  "plan": "pro",
+  "limits": {
+    "maxConcurrentCalls": 50,
+    "maxMembers": 25,
+    "maxApiKeys": 50
+  },
+  "memberCount": 8,
+  "createdAt": "2026-01-15T10:30:00.000Z"
+}
+```

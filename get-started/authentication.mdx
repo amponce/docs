@@ -1,0 +1,367 @@
+---
+title: "Authentication"
+sidebarTitle: "Authentication"
+description: "Secure your API requests with bearer tokens"
+---
+
+# Authentication
+
+Relay Agent supports two authentication methods: **API key** authentication for
+programmatic access, and **session cookie** authentication for the admin console.
+
+---
+
+## API Key Authentication
+
+All API requests must include a valid API key. Keys use the prefix `ra_` and are
+passed via the `Authorization` header.
+
+### Header Format
+
+```
+Authorization: Bearer ra_your_api_key_here
+```
+
+<CodeGroup>
+
+```bash curl
+curl -X GET http://localhost:3001/v1/agents \
+  -H "Authorization: Bearer ra_your_api_key_here"
+```
+
+```typescript TypeScript
+import { RelayClient } from "@relay-agent/sdk";
+
+const client = new RelayClient({
+  apiKey: "ra_your_api_key_here",
+  baseUrl: "http://localhost:3001",
+});
+
+// All requests are automatically authenticated
+const agents = await client.agents.list();
+```
+
+```python Python
+import requests
+
+headers = {
+    "Authorization": "Bearer ra_your_api_key_here",
+    "Content-Type": "application/json",
+}
+
+response = requests.get(
+    "http://localhost:3001/v1/agents",
+    headers=headers,
+)
+```
+
+</CodeGroup>
+
+### Key Format
+
+| Property | Value |
+|----------|-------|
+| Prefix | `ra_` |
+| Full Format | `ra_` followed by a cryptographically random string |
+| Storage | Hashed with SHA-256 + configurable salt before database storage |
+| Display | Shown in full only at creation time; never retrievable again |
+
+<Warning>
+API keys are hashed before storage using SHA-256 with a server-side salt
+(`API_KEY_SALT` environment variable). If you lose your key, you must revoke
+it and create a new one.
+</Warning>
+
+### Creating API Keys
+
+**Via the Admin Console:**
+
+1. Navigate to **Settings > API Keys**
+2. Click **Create API Key**
+3. Enter a descriptive name (e.g., "Production Backend", "Staging CI")
+4. Copy the key immediately -- it will not be shown again
+
+**Via the API** (requires an existing key with admin permissions):
+
+```bash
+curl -X POST http://localhost:3001/v1/api-keys \
+  -H "Authorization: Bearer ra_existing_admin_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Backend",
+    "permissions": ["read", "write"]
+  }'
+```
+
+### Key Permissions
+
+Each API key has an associated permissions array:
+
+| Permission | Description |
+|-----------|-------------|
+| `read` | List and retrieve resources (agents, calls, usage data) |
+| `write` | Create, update, and delete resources; initiate calls |
+
+Default keys are created with both `["read", "write"]` permissions.
+
+### Key Revocation
+
+Revoked keys immediately stop working. Revocation is permanent.
+
+```bash
+curl -X DELETE http://localhost:3001/v1/api-keys/{keyId} \
+  -H "Authorization: Bearer ra_admin_key"
+```
+
+---
+
+## Rate Limiting
+
+Relay Agent enforces rate limits per API key to protect infrastructure and
+ensure fair usage.
+
+| Endpoint Category | Limit | Window |
+|-------------------|-------|--------|
+| `POST /v1/calls/phone` | 10 requests | 1 minute |
+| `POST /v1/calls/web` | 20 requests | 1 minute |
+| All other endpoints | 100 requests | 1 minute |
+
+<Note>
+Rate limit headers are included in every response:
+- `X-RateLimit-Limit` -- Maximum requests allowed in the window
+- `X-RateLimit-Remaining` -- Requests remaining in the current window
+- `X-RateLimit-Reset` -- Unix timestamp when the window resets
+</Note>
+
+When you exceed the rate limit, you receive a `429 Too Many Requests` response:
+
+```json
+{
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Rate limit exceeded. Try again in 45 seconds.",
+    "retryAfter": 45
+  }
+}
+```
+
+### Handling Rate Limits
+
+<CodeGroup>
+
+```typescript TypeScript
+async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof RelayAPIError && error.statusCode === 429) {
+        const waitMs = Math.pow(2, attempt) * 1000;
+        console.log(`Rate limited. Retrying in ${waitMs}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("Max retries exceeded");
+}
+
+const agent = await callWithRetry(() =>
+  client.agents.create({ /* ... */ })
+);
+```
+
+```python Python
+import time
+
+def call_with_retry(fn, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                wait = 2 ** attempt
+                print(f"Rate limited. Retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            raise
+    raise Exception("Max retries exceeded")
+```
+
+</CodeGroup>
+
+---
+
+## Session Authentication (Admin Console)
+
+The admin console uses cookie-based session authentication. This is for browser
+access only and is not intended for API integrations.
+
+### How Sessions Work
+
+1. User logs in via `POST /v1/console/auth/login` with email and password
+2. Server returns an `rs_` prefixed session token in a `relay_session` cookie
+3. Cookie settings: `httpOnly`, `secure` (in production), `sameSite: strict`
+4. Sessions expire after 7 days by default
+5. Sliding window: sessions are automatically extended by 7 days when less
+   than 24 hours remain
+
+### Session Cookie Properties
+
+| Property | Value |
+|----------|-------|
+| Cookie Name | `relay_session` |
+| Token Prefix | `rs_` |
+| Storage | SHA-256 hashed in the `sessions` table |
+| Expiry | 7 days (sliding window) |
+| HttpOnly | Yes |
+| Secure | Yes (production only) |
+| SameSite | Strict |
+
+<Info>
+Session authentication should not be used for server-to-server API calls. Use
+API keys instead.
+</Info>
+
+---
+
+## RBAC Roles
+
+Users in the admin console are assigned roles through organizational memberships.
+Each role controls what actions the user can perform.
+
+| Role | Description | Capabilities |
+|------|-------------|-------------|
+| `admin` | Full workspace administrator | Manage members, API keys, billing, all resources |
+| `developer` | Builder and configurator | Create/edit agents, calls, knowledge bases, campaigns; view usage |
+| `member` | Read-only observer | View agents, calls, and analytics; cannot modify resources |
+
+### Role Assignment
+
+Roles are assigned per-organization through the memberships system. A single
+user can have different roles in different organizations.
+
+```json
+{
+  "userId": "user_abc123",
+  "orgId": "org_xyz789",
+  "role": "developer"
+}
+```
+
+<Note>
+Role-based access applies only to the admin console (session authentication).
+API keys operate at the organization level and have permission-based access
+(`read`, `write`) rather than role-based access.
+</Note>
+
+---
+
+## Error Responses
+
+Authentication failures return a `401 Unauthorized` status:
+
+```json
+{
+  "error": {
+    "code": "AUTHENTICATION_ERROR",
+    "message": "Missing API key or session. Provide Authorization: Bearer ra_... header or log in via the console."
+  }
+}
+```
+
+| Scenario | Error Message |
+|----------|--------------|
+| No auth header | "Missing API key or session..." |
+| Invalid API key | "Authentication failed" |
+| Expired session | "Session expired or invalid" |
+| Wrong org membership | "Not a member of this workspace" |
+| Malformed header | "Missing Authorization header. Expected: Bearer ra_..." |
+
+---
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Never expose API keys in client-side code">
+    API keys should only be used on the server side. For browser-based
+    applications, use the web call flow: your backend creates a web call
+    session and returns the short-lived `accessToken` to the frontend.
+  </Accordion>
+  <Accordion title="Use environment variables">
+    Store API keys in environment variables, not in source code.
+
+    ```bash
+    # .env
+    RELAY_API_KEY=ra_your_key_here
+    ```
+
+    ```typescript
+    const client = new RelayClient({
+      apiKey: process.env.RELAY_API_KEY!,
+    });
+    ```
+  </Accordion>
+  <Accordion title="Rotate keys regularly">
+    Create new keys periodically and revoke old ones. Use descriptive names
+    so you know which key is used where.
+  </Accordion>
+  <Accordion title="Use least-privilege permissions">
+    If a key only needs to read data (dashboards, monitoring), create it
+    with `["read"]` permissions only.
+  </Accordion>
+  <Accordion title="Verify webhook signatures">
+    All webhook payloads are signed with HMAC-SHA256 using your
+    `WEBHOOK_SIGNING_SECRET`. Always verify the `X-Relay-Signature` header
+    before processing webhook data.
+
+    ```typescript
+    import { createHmac } from "node:crypto";
+
+    function verifyWebhookSignature(
+      payload: string,
+      signature: string,
+      secret: string
+    ): boolean {
+      const expected = createHmac("sha256", secret)
+        .update(payload)
+        .digest("hex");
+      return signature === expected;
+    }
+    ```
+  </Accordion>
+  <Accordion title="Monitor API key usage">
+    Check the Usage page in the admin console to see which keys are making
+    requests and how much they are consuming.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## WebSocket Authentication
+
+WebSocket connections for web calls and DevTools use token-based authentication
+passed as query parameters, not headers.
+
+**Web call streams:**
+```
+ws://localhost:3001/v1/calls/web-stream?callId=CALL_ID&agentId=AGENT_ID&token=ACCESS_TOKEN
+```
+
+The `token` is the `accessToken` returned by `POST /v1/calls/web`. It is a
+short-lived, single-use token that is hashed and validated against the call's
+stored metadata.
+
+**DevTools inspector:**
+```
+ws://localhost:3001/v1/calls/CALL_ID/inspect
+```
+
+DevTools WebSocket connections are scoped to the authenticated organization.
+
+<Warning>
+WebSocket upgrade requests bypass the standard auth middleware. Authentication
+is handled by validating the `token` query parameter against the stored hash
+for that call.
+</Warning>

@@ -1,0 +1,220 @@
+---
+title: "Usage & Cost Tracking"
+sidebarTitle: "Usage"
+description: "Monitor call volume, minutes, and cost breakdowns by provider, agent, and time period."
+---
+
+## Overview
+
+The usage API provides detailed cost and volume metrics for your organization. Track total spend, call minutes, and per-provider breakdowns across any date range. Costs are stored internally as integer cents and returned as dollar amounts.
+
+## Usage Summary
+
+Get an aggregate summary for a date range:
+
+<CodeGroup>
+
+```bash cURL
+curl "https://your-host/v1/usage?startDate=2026-02-01&endDate=2026-02-28" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+```typescript TypeScript
+const params = new URLSearchParams({
+  startDate: "2026-02-01",
+  endDate: "2026-02-28",
+});
+
+const response = await fetch(`https://your-host/v1/usage?${params}`, {
+  headers: { "Authorization": "Bearer ra_your_api_key" },
+});
+
+const usage = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "https://your-host/v1/usage",
+    headers={"Authorization": "Bearer ra_your_api_key"},
+    params={"startDate": "2026-02-01", "endDate": "2026-02-28"},
+)
+
+usage = response.json()
+```
+
+</CodeGroup>
+
+### Query Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `startDate` | `string` | First of current month | Start date in `YYYY-MM-DD` format. |
+| `endDate` | `string` | Today | End date in `YYYY-MM-DD` format. |
+| `groupBy` | `string` | - | Optional grouping: `day`, `agent`, or `provider`. |
+
+### Response
+
+```json
+{
+  "totalCost": 47.23,
+  "totalCalls": 312,
+  "totalMinutes": 1248,
+  "breakdown": {
+    "stt": { "cost": 8.12, "provider": "deepgram" },
+    "llm": { "cost": 22.45, "provider": "openai" },
+    "tts": { "cost": 11.30, "provider": "elevenlabs" },
+    "telephony": { "cost": 5.36, "provider": "twilio" }
+  },
+  "startDate": "2026-02-01T00:00:00.000Z",
+  "endDate": "2026-02-28T23:59:59.999Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `totalCost` | `number` | Total cost in dollars. |
+| `totalCalls` | `number` | Number of calls in the period. |
+| `totalMinutes` | `number` | Total call duration in minutes. |
+| `breakdown` | `object` | Cost breakdown by service category. |
+| `startDate` | `string` | Start of the reporting period (ISO 8601). |
+| `endDate` | `string` | End of the reporting period (ISO 8601). |
+
+<Note>
+  When no `startDate` is provided, the API defaults to the first day of the current month. When no `endDate` is provided, it defaults to the current timestamp.
+</Note>
+
+## Daily Breakdown
+
+Get a day-by-day breakdown of usage:
+
+```bash
+curl "https://your-host/v1/usage/daily?startDate=2026-02-01&endDate=2026-02-07" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+### Response
+
+```json
+{
+  "data": [
+    {
+      "date": "2026-02-01",
+      "totalCost": 6.50,
+      "totalCalls": 45,
+      "totalMinutes": 180
+    },
+    {
+      "date": "2026-02-02",
+      "totalCost": 7.12,
+      "totalCalls": 52,
+      "totalMinutes": 208
+    },
+    {
+      "date": "2026-02-03",
+      "totalCost": 5.80,
+      "totalCalls": 38,
+      "totalMinutes": 152
+    }
+  ]
+}
+```
+
+## Usage by Agent
+
+See which agents are driving the most cost and volume:
+
+```bash
+curl "https://your-host/v1/usage/by-agent?startDate=2026-02-01&endDate=2026-02-28" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+### Response
+
+```json
+{
+  "data": [
+    {
+      "agentId": "agent_abc123def456",
+      "agentName": "Support Agent",
+      "totalCost": 32.10,
+      "totalCalls": 210,
+      "totalMinutes": 840
+    },
+    {
+      "agentId": "agent_xyz789ghi012",
+      "agentName": "Sales Agent",
+      "totalCost": 15.13,
+      "totalCalls": 102,
+      "totalMinutes": 408
+    }
+  ]
+}
+```
+
+## Cost Breakdown by Provider
+
+The `breakdown` object in the usage summary groups costs by service category:
+
+| Category | Description | Example Providers |
+|---|---|---|
+| `stt` | Speech-to-text transcription. | Deepgram, Google Cloud STT |
+| `llm` | Large language model inference. | OpenAI (GPT-4o, GPT-4o-mini), Anthropic (Claude) |
+| `tts` | Text-to-speech synthesis. | ElevenLabs, Google Cloud TTS |
+| `telephony` | Phone call minutes and fees. | Twilio, Telnyx |
+
+## How Costs Are Calculated
+
+<Steps>
+  <Step title="Provider rates">
+    Each provider adapter tracks per-unit costs (e.g. per token for LLM, per character for TTS, per minute for telephony).
+  </Step>
+  <Step title="Stored as cents">
+    Costs are stored in the database as integer cents to avoid floating-point precision issues. For example, $1.23 is stored as `123`.
+  </Step>
+  <Step title="Returned as dollars">
+    The API divides by 100 before returning, so all values in API responses are in dollars (e.g. `1.23`).
+  </Step>
+</Steps>
+
+<Tip>
+  To monitor costs in real time, combine the usage API with [webhooks](/deploy/webhooks). The `call.ended` event includes duration and metadata you can use for per-call cost estimation.
+</Tip>
+
+## Dashboard Example
+
+Build a cost dashboard by combining the three endpoints:
+
+```typescript
+async function getCostDashboard(startDate: string, endDate: string) {
+  const headers = { "Authorization": "Bearer ra_your_api_key" };
+  const params = `startDate=${startDate}&endDate=${endDate}`;
+
+  const [summary, daily, byAgent] = await Promise.all([
+    fetch(`https://your-host/v1/usage?${params}`, { headers }).then(r => r.json()),
+    fetch(`https://your-host/v1/usage/daily?${params}`, { headers }).then(r => r.json()),
+    fetch(`https://your-host/v1/usage/by-agent?${params}`, { headers }).then(r => r.json()),
+  ]);
+
+  return {
+    totalSpend: summary.totalCost,
+    totalCalls: summary.totalCalls,
+    avgCostPerCall: summary.totalCalls > 0
+      ? (summary.totalCost / summary.totalCalls).toFixed(2)
+      : 0,
+    avgCallDuration: summary.totalCalls > 0
+      ? (summary.totalMinutes / summary.totalCalls).toFixed(1)
+      : 0,
+    costByProvider: summary.breakdown,
+    dailyTrend: daily.data,
+    topAgents: byAgent.data.sort((a, b) => b.totalCost - a.totalCost),
+  };
+}
+```
+
+## Next Steps
+
+- [Call History](/monitor/call-history) -- View individual call records and transcripts
+- [A/B Testing](/monitor/ab-testing) -- Compare agent performance and costs
+- [Latency](/monitor/latency) -- Monitor and optimize response times

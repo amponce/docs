@@ -1,0 +1,238 @@
+---
+title: "Webhooks"
+sidebarTitle: "Webhooks"
+description: "Receive real-time event notifications for calls, transcripts, tool invocations, and more."
+---
+
+## Overview
+
+Relay Agent sends webhook events to your server as calls progress. Every significant moment -- call start, transcript completion, tool invocation, agent transition -- is delivered as an HTTP POST to the `serverUrl` configured on your agent.
+
+## Configuration
+
+Set the `serverUrl` field on your agent to receive webhooks:
+
+```bash
+curl -X POST https://your-host/v1/agents \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Support Agent",
+    "serverUrl": "https://your-server.com/webhooks/relay",
+    "model": { "provider": "openai", "model": "gpt-4o" },
+    "voice": { "provider": "elevenlabs", "voiceId": "rachel" }
+  }'
+```
+
+All events from calls handled by this agent will be POSTed to `https://your-server.com/webhooks/relay`.
+
+## Event Payload Structure
+
+Every webhook event follows this structure:
+
+```json
+{
+  "id": "evt_aBcDeFgHiJkLmNoPqRsTuVw",
+  "type": "call.started",
+  "callId": "call_xYzAbCdEf123456789012",
+  "agentId": "agent_abc123def456",
+  "orgId": "org_abc123",
+  "timestamp": "2026-02-08T12:00:00.000Z",
+  "data": {
+    "type": "phone",
+    "direction": "outbound"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique event ID (prefixed `evt_`). Use for deduplication. |
+| `type` | `string` | Event type (see table below). |
+| `callId` | `string` | The call this event belongs to. |
+| `agentId` | `string` | The agent handling the call. |
+| `orgId` | `string` | Your organization ID. |
+| `timestamp` | `string` | ISO 8601 timestamp of when the event occurred. |
+| `data` | `object` | Event-specific payload. Varies by event type. |
+
+## Event Types
+
+### Call Events
+
+| Event | Description | Data Fields |
+|---|---|---|
+| `call.created` | Call record created (queued). | `type`, `direction` |
+| `call.started` | Call connected and audio streaming began. | `type`, `direction` |
+| `call.ended` | Call ended normally. | `duration`, `endReason` |
+| `call.failed` | Call failed to connect or errored. | `error`, `endReason` |
+| `call.transferred` | Call transferred to another agent or number. | `transferTarget`, `transferType` |
+
+### Human-in-the-Loop Events
+
+| Event | Description | Data Fields |
+|---|---|---|
+| `call.whisper` | Context was whispered to the agent. | `message` |
+| `call.interject` | Agent response was overridden. | `say`, `then` |
+| `call.terminate` | Call was terminated via API. | `reason`, `finalMessage` |
+
+### Transcript Events
+
+| Event | Description | Data Fields |
+|---|---|---|
+| `transcript.partial` | Partial real-time transcript (user speaking). | `text`, `confidence` |
+| `transcript.final` | Final transcript of a complete utterance. | `text`, `confidence`, `duration` |
+
+### Tool Events
+
+| Event | Description | Data Fields |
+|---|---|---|
+| `tool.invoked` | Agent invoked a tool/function call. | `toolName`, `arguments` |
+| `tool.response` | Tool execution returned a result. | `toolName`, `result` |
+
+### Agent Events
+
+| Event | Description | Data Fields |
+|---|---|---|
+| `memory.update` | Agent memory was updated. | `key`, `value` |
+| `agent.transitioned` | Multi-agent handoff occurred. | `fromAgentId`, `toAgentId` |
+
+## Delivery
+
+### HTTP Headers
+
+Each webhook request includes these headers:
+
+| Header | Description |
+|---|---|
+| `Content-Type` | `application/json` |
+| `X-Relay-Signature` | HMAC-SHA256 signature of the request body. |
+| `X-Relay-Event` | Event type (e.g. `call.started`). |
+| `X-Relay-Timestamp` | ISO 8601 timestamp of the delivery attempt. |
+
+### Retry Policy
+
+Failed webhook deliveries are retried with exponential backoff:
+
+| Attempt | Delay |
+|---|---|
+| 1 (initial) | Immediate |
+| 2 | 1 second |
+| 3 | 5 seconds |
+| 4 | 30 seconds |
+| 5 | 120 seconds |
+
+A delivery is considered successful when your server returns a `2xx` status code within **5 seconds**. After 5 failed attempts, the event is marked as permanently failed.
+
+<Note>
+  Webhook deliveries are processed asynchronously via BullMQ with a concurrency of 10. Events are delivered in order per call, but delivery order across different calls is not guaranteed.
+</Note>
+
+### Deliverable Events
+
+Not all internal events are delivered via webhooks. The following events are sent to your `serverUrl`:
+
+- `call.started`
+- `call.ended`
+- `call.failed`
+- `call.transferred`
+- `transcript.final`
+- `tool.invoked`
+- `tool.response`
+- `agent.transitioned`
+
+Events like `call.created`, `call.whisper`, `call.interject`, `call.terminate`, `transcript.partial`, and `memory.update` are available through the internal event bus and [DevTools](/monitor/devtools) but are not delivered as webhooks.
+
+## Webhook Handler Example
+
+<CodeGroup>
+
+```typescript Express (Node.js)
+import express from "express";
+import crypto from "crypto";
+
+const app = express();
+app.use(express.json());
+
+const WEBHOOK_SECRET = process.env.RELAY_WEBHOOK_SECRET!;
+
+app.post("/webhooks/relay", (req, res) => {
+  // 1. Verify the signature
+  const signature = req.headers["x-relay-signature"] as string;
+  const body = JSON.stringify(req.body);
+  const expected = crypto
+    .createHmac("sha256", WEBHOOK_SECRET)
+    .update(body)
+    .digest("hex");
+
+  if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+    return res.status(401).send("Invalid signature");
+  }
+
+  // 2. Handle the event
+  const event = req.body;
+  switch (event.type) {
+    case "call.started":
+      console.log(`Call ${event.callId} started`);
+      break;
+    case "call.ended":
+      console.log(`Call ${event.callId} ended: ${event.data.endReason}`);
+      break;
+    case "transcript.final":
+      console.log(`Transcript: ${event.data.text}`);
+      break;
+    case "tool.invoked":
+      console.log(`Tool called: ${event.data.toolName}`);
+      break;
+  }
+
+  res.status(200).send({ received: true });
+});
+
+app.listen(4000);
+```
+
+```python Flask (Python)
+import hmac
+import hashlib
+import json
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+WEBHOOK_SECRET = "your_webhook_signing_secret"
+
+@app.route("/webhooks/relay", methods=["POST"])
+def handle_webhook():
+    # 1. Verify the signature
+    signature = request.headers.get("X-Relay-Signature", "")
+    body = request.get_data(as_text=True)
+    expected = hmac.new(
+        WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected, signature):
+        return jsonify({"error": "Invalid signature"}), 401
+
+    # 2. Handle the event
+    event = request.get_json()
+    event_type = event["type"]
+
+    if event_type == "call.started":
+        print(f"Call {event['callId']} started")
+    elif event_type == "call.ended":
+        print(f"Call {event['callId']} ended: {event['data']['endReason']}")
+    elif event_type == "transcript.final":
+        print(f"Transcript: {event['data']['text']}")
+    elif event_type == "tool.invoked":
+        print(f"Tool called: {event['data']['toolName']}")
+
+    return jsonify({"received": True}), 200
+```
+
+</CodeGroup>
+
+## Next Steps
+
+- [Webhook Security](/deploy/webhook-security) -- Verify webhook signatures
+- [DevTools](/monitor/devtools) -- Real-time call inspection for all event types
+- [Call History](/monitor/call-history) -- Query past call records and transcripts

@@ -1,0 +1,3439 @@
+openapi: 3.0.3
+info:
+  title: Relay Agent Voice AI API
+  description: |
+    Developer-first voice AI engine for real-time voice conversations between
+    AI agents and humans over phone (Twilio) and web (WebSocket).
+
+    Relay Agent handles the full voice pipeline: speech-to-text, LLM reasoning,
+    text-to-speech, and telephony orchestration. It supports multi-agent
+    compositions, knowledge base RAG, outbound campaigns, A/B testing, and
+    real-time cost tracking.
+  version: 1.0.0
+  contact:
+    name: Relay Agent
+    url: https://relayagent.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.relayagent.com
+    description: Relay Agent Voice AI API
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Agents
+    description: Create and manage voice AI agents with configurable LLM, TTS, and STT providers.
+  - name: Composed Agents
+    description: Multi-agent compositions with routing, transitions, and shared context.
+  - name: Agent Versions
+    description: Version history, activation, and rollback for agent configurations.
+  - name: Calls
+    description: Initiate and manage phone and web voice calls.
+  - name: Knowledge Bases
+    description: RAG knowledge bases with file upload, chunking, and semantic search.
+  - name: Campaigns
+    description: Batch outbound calling campaigns with scheduling and retry policies.
+  - name: A/B Tests
+    description: A/B testing framework for comparing agent variants.
+  - name: Phone Numbers
+    description: Phone number registration, provisioning, and management.
+  - name: Usage
+    description: Usage metering, cost tracking, and billing breakdowns.
+
+paths:
+  # ===========================================================================
+  # Agents
+  # ===========================================================================
+  /v1/agents:
+    post:
+      operationId: createAgent
+      summary: Create agent
+      description: Create a new voice AI agent with LLM, voice, and transcriber configuration.
+      tags: [Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRequest'
+      responses:
+        '201':
+          description: Agent created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      operationId: listAgents
+      summary: List agents
+      description: List all agents belonging to the authenticated organization.
+      tags: [Agents]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, hasMore]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Agent'
+                  hasMore:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/agents/{id}:
+    get:
+      operationId: getAgent
+      summary: Get agent
+      description: Retrieve a single agent by ID.
+      tags: [Agents]
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200':
+          description: Agent details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      operationId: updateAgent
+      summary: Update agent
+      description: |
+        Partially update an agent. Increments the version number and marks the
+        agent as unpublished (draft).
+      tags: [Agents]
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRequest'
+      responses:
+        '200':
+          description: Agent updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: deleteAgent
+      summary: Delete agent
+      description: Permanently delete an agent.
+      tags: [Agents]
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '204':
+          description: Agent deleted successfully.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/agents/{id}/publish:
+    post:
+      operationId: publishAgent
+      summary: Publish agent
+      description: Publish the current agent draft, making it live.
+      tags: [Agents]
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                versionTitle:
+                  type: string
+                  description: Optional title for this published version.
+                versionDescription:
+                  type: string
+                  description: Optional description for this published version.
+      responses:
+        '200':
+          description: Agent published successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/agents/{id}/unpublish:
+    post:
+      operationId: unpublishAgent
+      summary: Unpublish agent
+      description: Revert the agent back to draft status.
+      tags: [Agents]
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200':
+          description: Agent unpublished successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # Agent Versions
+  # ===========================================================================
+  /v1/agents/{agentId}/versions:
+    get:
+      operationId: listAgentVersions
+      summary: List agent versions
+      description: Retrieve the version history for a specific agent.
+      tags: [Agent Versions]
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The agent ID.
+      responses:
+        '200':
+          description: List of agent versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/agents/{agentId}/versions/{version}:
+    get:
+      operationId: getAgentVersion
+      summary: Get agent version
+      description: Retrieve a specific version snapshot for an agent.
+      tags: [Agent Versions]
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The agent ID.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number.
+      responses:
+        '200':
+          description: Agent version details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/agents/{agentId}/versions/{version}/activate:
+    post:
+      operationId: activateAgentVersion
+      summary: Activate agent version
+      description: |
+        Activate a specific version, deactivating all other versions.
+        Updates the agent's system prompt to match this version.
+      tags: [Agent Versions]
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The agent ID.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number to activate.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateVersionRequest'
+      responses:
+        '200':
+          description: Version activated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/agents/{agentId}/versions/{version}/rollback:
+    post:
+      operationId: rollbackAgentVersion
+      summary: Rollback agent version
+      description: |
+        Create a new version from the specified historical version and activate it.
+        This effectively rolls back to a previous configuration without losing history.
+      tags: [Agent Versions]
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The agent ID.
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The version number to rollback to.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateVersionRequest'
+      responses:
+        '201':
+          description: Rollback version created and activated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # Composed Agents
+  # ===========================================================================
+  /v1/agents/compose:
+    post:
+      operationId: createComposedAgent
+      summary: Create composed agent
+      description: |
+        Create a multi-agent composition with a router agent, member agents,
+        and transition rules.
+      tags: [Composed Agents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateComposedAgentRequest'
+      responses:
+        '201':
+          description: Composed agent created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComposedAgent'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/agents/composed:
+    get:
+      operationId: listComposedAgents
+      summary: List composed agents
+      description: List all composed agents belonging to the authenticated organization.
+      tags: [Composed Agents]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of composed agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, hasMore]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ComposedAgent'
+                  hasMore:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/agents/composed/{id}:
+    get:
+      operationId: getComposedAgent
+      summary: Get composed agent
+      description: Retrieve a single composed agent by ID.
+      tags: [Composed Agents]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The composed agent ID.
+      responses:
+        '200':
+          description: Composed agent details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComposedAgent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      operationId: updateComposedAgent
+      summary: Update composed agent
+      description: Partially update a composed agent.
+      tags: [Composed Agents]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The composed agent ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateComposedAgentRequest'
+      responses:
+        '200':
+          description: Composed agent updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComposedAgent'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: deleteComposedAgent
+      summary: Delete composed agent
+      description: Permanently delete a composed agent.
+      tags: [Composed Agents]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The composed agent ID.
+      responses:
+        '204':
+          description: Composed agent deleted successfully.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # Calls
+  # ===========================================================================
+  /v1/calls/phone:
+    post:
+      operationId: createPhoneCall
+      summary: Create phone call
+      description: Initiate an outbound phone call using a configured agent.
+      tags: [Calls]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePhoneCallRequest'
+      responses:
+        '201':
+          description: Phone call created and queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Call'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/calls/web:
+    post:
+      operationId: createWebCall
+      summary: Create web call
+      description: |
+        Create a web-based voice call. Returns an access token and WebSocket URL
+        for the client to connect to the real-time audio stream.
+      tags: [Calls]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebCallRequest'
+      responses:
+        '201':
+          description: Web call created with access token and WebSocket URL.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Call'
+                  - type: object
+                    required: [accessToken, websocketUrl]
+                    properties:
+                      accessToken:
+                        type: string
+                        description: Short-lived token to authenticate the WebSocket connection.
+                      websocketUrl:
+                        type: string
+                        description: WebSocket endpoint for the real-time audio stream.
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/calls:
+    get:
+      operationId: listCalls
+      summary: List calls
+      description: List all calls for the authenticated organization with optional filtering.
+      tags: [Calls]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: status
+          in: query
+          schema:
+            type: string
+          description: Filter by call status (e.g. queued, in_progress, completed, failed).
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [inbound, outbound]
+          description: Filter by call direction.
+      responses:
+        '200':
+          description: Paginated list of calls.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, hasMore]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Call'
+                  hasMore:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/calls/{id}:
+    get:
+      operationId: getCall
+      summary: Get call
+      description: Retrieve details for a specific call.
+      tags: [Calls]
+      parameters:
+        - $ref: '#/components/parameters/CallId'
+      responses:
+        '200':
+          description: Call details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Call'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/calls/{id}/whisper:
+    post:
+      operationId: whisperToAgent
+      summary: Whisper to agent
+      description: |
+        Inject a context message to the agent during a live call. The caller
+        does not hear the whisper; only the agent receives it as additional context.
+      tags: [Calls]
+      parameters:
+        - $ref: '#/components/parameters/CallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhisperRequest'
+      responses:
+        '200':
+          description: Whisper delivered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallActionResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/calls/{id}/interject:
+    post:
+      operationId: interjectResponse
+      summary: Interject response
+      description: |
+        Override the agent's next response with a specific message. The agent
+        will speak the provided text and optionally resume with a follow-up action.
+      tags: [Calls]
+      parameters:
+        - $ref: '#/components/parameters/CallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterjectRequest'
+      responses:
+        '200':
+          description: Interjection delivered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallActionResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/calls/{id}/terminate:
+    post:
+      operationId: terminateCall
+      summary: Terminate call
+      description: End an active call, optionally providing a reason and final message.
+      tags: [Calls]
+      parameters:
+        - $ref: '#/components/parameters/CallId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TerminateRequest'
+      responses:
+        '200':
+          description: Termination signal delivered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallActionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # Knowledge Bases
+  # ===========================================================================
+  /v1/knowledge-bases:
+    post:
+      operationId: createKnowledgeBase
+      summary: Create knowledge base
+      description: Create a new knowledge base for RAG-powered agent conversations.
+      tags: [Knowledge Bases]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKnowledgeBaseRequest'
+      responses:
+        '201':
+          description: Knowledge base created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBase'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      operationId: listKnowledgeBases
+      summary: List knowledge bases
+      description: List all knowledge bases belonging to the authenticated organization.
+      tags: [Knowledge Bases]
+      responses:
+        '200':
+          description: List of knowledge bases.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KnowledgeBase'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/knowledge-bases/{id}:
+    get:
+      operationId: getKnowledgeBase
+      summary: Get knowledge base
+      description: Retrieve a single knowledge base by ID.
+      tags: [Knowledge Bases]
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      responses:
+        '200':
+          description: Knowledge base details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBase'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      operationId: updateKnowledgeBase
+      summary: Update knowledge base
+      description: Partially update a knowledge base.
+      tags: [Knowledge Bases]
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateKnowledgeBaseRequest'
+      responses:
+        '200':
+          description: Knowledge base updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBase'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: deleteKnowledgeBase
+      summary: Delete knowledge base
+      description: Permanently delete a knowledge base and all associated files and chunks.
+      tags: [Knowledge Bases]
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      responses:
+        '204':
+          description: Knowledge base deleted successfully.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/knowledge-bases/{id}/files/upload:
+    post:
+      operationId: uploadKnowledgeBaseFile
+      summary: Upload file (multipart)
+      description: |
+        Upload a file to the knowledge base using multipart form data. The file
+        is parsed, chunked, and embedded asynchronously. Supported formats
+        include PDF, TXT, MD, DOCX, CSV, and JSON.
+      tags: [Knowledge Bases]
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file to upload.
+      responses:
+        '201':
+          description: File uploaded and queued for processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseFile'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/knowledge-bases/{id}/files:
+    post:
+      operationId: addKnowledgeBaseFile
+      summary: Add file metadata
+      description: |
+        Add a file record to the knowledge base. If content is provided inline,
+        the file is enqueued for chunking and embedding.
+      tags: [Knowledge Bases]
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddFileRequest'
+      responses:
+        '201':
+          description: File record created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseFile'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    get:
+      operationId: listKnowledgeBaseFiles
+      summary: List files
+      description: List all files belonging to a knowledge base.
+      tags: [Knowledge Bases]
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      responses:
+        '200':
+          description: List of knowledge base files.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KnowledgeBaseFile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/knowledge-bases/{id}/files/{fileId}:
+    delete:
+      operationId: deleteKnowledgeBaseFile
+      summary: Delete file
+      description: Remove a file and its associated chunks from a knowledge base.
+      tags: [Knowledge Bases]
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The knowledge base file ID.
+      responses:
+        '204':
+          description: File deleted successfully.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/knowledge-bases/{id}/query:
+    post:
+      operationId: queryKnowledgeBase
+      summary: Query knowledge base
+      description: Perform a semantic search query against the knowledge base to test retrieval.
+      tags: [Knowledge Bases]
+      parameters:
+        - $ref: '#/components/parameters/KnowledgeBaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryKnowledgeBaseRequest'
+      responses:
+        '200':
+          description: Query results.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KnowledgeBaseChunk'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # Campaigns
+  # ===========================================================================
+  /v1/campaigns:
+    post:
+      operationId: createCampaign
+      summary: Create campaign
+      description: Create a new outbound calling campaign in draft status.
+      tags: [Campaigns]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+      responses:
+        '201':
+          description: Campaign created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      operationId: listCampaigns
+      summary: List campaigns
+      description: List all campaigns belonging to the authenticated organization.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated list of campaigns.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, hasMore]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Campaign'
+                  hasMore:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/campaigns/{id}:
+    get:
+      operationId: getCampaign
+      summary: Get campaign
+      description: Retrieve a campaign by ID, including contact count breakdown.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Campaign details with contact counts.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Campaign'
+                  - type: object
+                    properties:
+                      contactCounts:
+                        type: object
+                        properties:
+                          total:
+                            type: integer
+                          pending:
+                            type: integer
+                          completed:
+                            type: integer
+                          failed:
+                            type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      operationId: updateCampaign
+      summary: Update campaign
+      description: Partially update a campaign. Only allowed while campaign is in draft status.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCampaignRequest'
+      responses:
+        '200':
+          description: Campaign updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+    delete:
+      operationId: deleteCampaign
+      summary: Delete campaign
+      description: Delete a campaign. Only allowed when status is draft or cancelled.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '204':
+          description: Campaign deleted successfully.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/campaigns/{id}/start:
+    post:
+      operationId: startCampaign
+      summary: Start campaign
+      description: Transition a campaign from draft to running. Begins placing outbound calls.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Campaign started successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/campaigns/{id}/pause:
+    post:
+      operationId: pauseCampaign
+      summary: Pause campaign
+      description: Pause a running campaign. In-progress calls complete; no new calls are placed.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Campaign paused successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/campaigns/{id}/resume:
+    post:
+      operationId: resumeCampaign
+      summary: Resume campaign
+      description: Resume a paused campaign back to running status.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Campaign resumed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/campaigns/{id}/cancel:
+    post:
+      operationId: cancelCampaign
+      summary: Cancel campaign
+      description: |
+        Cancel a running or paused campaign. Cannot be undone. Remaining
+        contacts are not called.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Campaign cancelled successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /v1/campaigns/{id}/contacts:
+    post:
+      operationId: uploadCampaignContacts
+      summary: Upload contacts
+      description: Upload a batch of contacts to a campaign for outbound calling.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadContactsRequest'
+      responses:
+        '201':
+          description: Contacts uploaded successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [uploaded, totalContacts]
+                properties:
+                  uploaded:
+                    type: integer
+                    description: Number of contacts uploaded in this batch.
+                  totalContacts:
+                    type: integer
+                    description: Total number of contacts in the campaign after upload.
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/campaigns/{id}/results:
+    get:
+      operationId: getCampaignResults
+      summary: Get campaign results
+      description: Retrieve campaign results with aggregated statistics.
+      tags: [Campaigns]
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Campaign results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignResults'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # A/B Tests
+  # ===========================================================================
+  /v1/ab-tests:
+    post:
+      operationId: createAbTest
+      summary: Create A/B test
+      description: Create a new A/B test comparing two agent variants.
+      tags: [A/B Tests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAbTestRequest'
+      responses:
+        '201':
+          description: A/B test created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbTest'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      operationId: listAbTests
+      summary: List A/B tests
+      description: List all A/B tests belonging to the authenticated organization.
+      tags: [A/B Tests]
+      responses:
+        '200':
+          description: List of A/B tests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AbTest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/ab-tests/{id}:
+    get:
+      operationId: getAbTest
+      summary: Get A/B test
+      description: Retrieve an A/B test by ID with current results.
+      tags: [A/B Tests]
+      parameters:
+        - $ref: '#/components/parameters/AbTestId'
+      responses:
+        '200':
+          description: A/B test details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbTest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      operationId: updateAbTest
+      summary: Update A/B test
+      description: Partially update an A/B test. Only allowed while in draft status.
+      tags: [A/B Tests]
+      parameters:
+        - $ref: '#/components/parameters/AbTestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAbTestRequest'
+      responses:
+        '200':
+          description: A/B test updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbTest'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: deleteAbTest
+      summary: Delete A/B test
+      description: Delete an A/B test. Only allowed when status is draft or completed.
+      tags: [A/B Tests]
+      parameters:
+        - $ref: '#/components/parameters/AbTestId'
+      responses:
+        '204':
+          description: A/B test deleted successfully.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/ab-tests/{id}/start:
+    post:
+      operationId: startAbTest
+      summary: Start A/B test
+      description: Transition an A/B test from draft to running.
+      tags: [A/B Tests]
+      parameters:
+        - $ref: '#/components/parameters/AbTestId'
+      responses:
+        '200':
+          description: A/B test started successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbTest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/ab-tests/{id}/promote:
+    post:
+      operationId: promoteAbTestWinner
+      summary: Promote winner
+      description: |
+        Promote the winning variant of a running or completed A/B test.
+        Marks the test as completed.
+      tags: [A/B Tests]
+      parameters:
+        - $ref: '#/components/parameters/AbTestId'
+      responses:
+        '200':
+          description: Winner promoted and test completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbTest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # Phone Numbers
+  # ===========================================================================
+  /v1/phone-numbers:
+    post:
+      operationId: registerPhoneNumber
+      summary: Register phone number
+      description: Register an existing phone number with Relay Agent and assign it to agents.
+      tags: [Phone Numbers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePhoneNumberRequest'
+      responses:
+        '201':
+          description: Phone number registered successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneNumber'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      operationId: listPhoneNumbers
+      summary: List phone numbers
+      description: List all phone numbers belonging to the authenticated organization.
+      tags: [Phone Numbers]
+      responses:
+        '200':
+          description: List of phone numbers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PhoneNumber'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/phone-numbers/available:
+    get:
+      operationId: searchAvailableNumbers
+      summary: Search available numbers
+      description: Search for available phone numbers to purchase from the telephony provider.
+      tags: [Phone Numbers]
+      parameters:
+        - name: areaCode
+          in: query
+          schema:
+            type: string
+          description: Filter by area code (e.g. 415).
+        - name: country
+          in: query
+          schema:
+            type: string
+          description: ISO country code (e.g. US, GB).
+        - name: contains
+          in: query
+          schema:
+            type: string
+          description: Search for numbers containing this pattern.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+          description: Maximum number of results to return.
+      responses:
+        '200':
+          description: Available phone numbers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AvailablePhoneNumber'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/phone-numbers/provision:
+    post:
+      operationId: provisionPhoneNumber
+      summary: Provision number
+      description: |
+        Purchase a phone number from the telephony provider, configure the
+        inbound webhook, and register it with Relay Agent in a single step.
+      tags: [Phone Numbers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvisionPhoneNumberRequest'
+      responses:
+        '201':
+          description: Phone number provisioned and registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneNumber'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/phone-numbers/{id}:
+    get:
+      operationId: getPhoneNumber
+      summary: Get phone number
+      description: Retrieve a single registered phone number by ID.
+      tags: [Phone Numbers]
+      parameters:
+        - $ref: '#/components/parameters/PhoneNumberId'
+      responses:
+        '200':
+          description: Phone number details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneNumber'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      operationId: updatePhoneNumber
+      summary: Update phone number
+      description: Update agent assignments and webhook configuration for a phone number.
+      tags: [Phone Numbers]
+      parameters:
+        - $ref: '#/components/parameters/PhoneNumberId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePhoneNumberRequest'
+      responses:
+        '200':
+          description: Phone number updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneNumber'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: removePhoneNumber
+      summary: Remove phone number
+      description: |
+        Remove a phone number from Relay Agent. This does not release the number
+        from the telephony provider.
+      tags: [Phone Numbers]
+      parameters:
+        - $ref: '#/components/parameters/PhoneNumberId'
+      responses:
+        '204':
+          description: Phone number removed successfully.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===========================================================================
+  # Usage
+  # ===========================================================================
+  /v1/usage:
+    get:
+      operationId: getUsageSummary
+      summary: Usage summary
+      description: |
+        Retrieve aggregated usage summary for the organization within the
+        specified date range. Defaults to the current month.
+      tags: [Usage]
+      parameters:
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+        - $ref: '#/components/parameters/GroupBy'
+      responses:
+        '200':
+          description: Usage summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/usage/daily:
+    get:
+      operationId: getUsageDaily
+      summary: Daily breakdown
+      description: Retrieve daily usage breakdown within the specified date range.
+      tags: [Usage]
+      parameters:
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+        - $ref: '#/components/parameters/GroupBy'
+      responses:
+        '200':
+          description: Daily usage data.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DailyUsage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/usage/by-agent:
+    get:
+      operationId: getUsageByAgent
+      summary: By agent breakdown
+      description: Retrieve usage breakdown grouped by agent within the specified date range.
+      tags: [Usage]
+      parameters:
+        - $ref: '#/components/parameters/StartDate'
+        - $ref: '#/components/parameters/EndDate'
+        - $ref: '#/components/parameters/GroupBy'
+      responses:
+        '200':
+          description: Agent-level usage data.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentUsage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+# =============================================================================
+# Components
+# =============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+      description: |
+        API key authentication. Include your key in the Authorization header:
+        `Authorization: Bearer <your-api-key>`.
+
+  # ---------------------------------------------------------------------------
+  # Reusable Parameters
+  # ---------------------------------------------------------------------------
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 50
+      description: Maximum number of items to return.
+
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      description: Number of items to skip for pagination.
+
+    AgentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The agent ID.
+
+    CallId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The call ID.
+
+    KnowledgeBaseId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The knowledge base ID.
+
+    CampaignId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The campaign ID.
+
+    AbTestId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The A/B test ID.
+
+    PhoneNumberId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The phone number record ID.
+
+    StartDate:
+      name: startDate
+      in: query
+      schema:
+        type: string
+        format: date
+      description: Start date (ISO 8601). Defaults to the first day of the current month.
+
+    EndDate:
+      name: endDate
+      in: query
+      schema:
+        type: string
+        format: date
+      description: End date (ISO 8601). Defaults to now.
+
+    GroupBy:
+      name: groupBy
+      in: query
+      schema:
+        type: string
+        enum: [day, agent, provider]
+      description: Grouping dimension for the usage data.
+
+  # ---------------------------------------------------------------------------
+  # Reusable Responses
+  # ---------------------------------------------------------------------------
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication credentials.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: The requested resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    ValidationError:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Conflict:
+      description: The operation conflicts with the current resource state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  # ---------------------------------------------------------------------------
+  # Schemas
+  # ---------------------------------------------------------------------------
+  schemas:
+    # =========================================================================
+    # Common
+    # =========================================================================
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code.
+              example: not_found
+            message:
+              type: string
+              description: Human-readable error description.
+              example: Agent not found.
+
+    Metadata:
+      type: object
+      additionalProperties: true
+      description: Arbitrary key-value metadata.
+
+    # =========================================================================
+    # Agent – Sub-schemas
+    # =========================================================================
+    ModelConfig:
+      type: object
+      required: [provider, model, systemPrompt]
+      properties:
+        provider:
+          type: string
+          enum: [openai, anthropic, google, groq, together]
+          description: LLM provider.
+        model:
+          type: string
+          description: Model identifier (e.g. gpt-4o, claude-sonnet-4-20250514).
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+          description: Sampling temperature.
+        maxTokens:
+          type: integer
+          minimum: 1
+          description: Maximum tokens for the completion.
+        systemPrompt:
+          type: string
+          minLength: 1
+          description: System prompt for the agent.
+
+    VoiceConfig:
+      type: object
+      required: [provider, voiceId]
+      properties:
+        provider:
+          type: string
+          enum: [elevenlabs, openai, playht, deepgram, cartesia]
+          description: TTS provider.
+        voiceId:
+          type: string
+          minLength: 1
+          description: Voice identifier from the TTS provider.
+        model:
+          type: string
+          description: TTS model variant.
+        speed:
+          type: number
+          minimum: 0.5
+          maximum: 2.0
+          description: Speech speed multiplier.
+        stability:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Voice stability (ElevenLabs).
+
+    TranscriberConfig:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [deepgram, assemblyai, google, openai, azure]
+          description: STT provider.
+        model:
+          type: string
+          description: STT model variant.
+        language:
+          type: string
+          default: en-US
+          description: Language code for transcription.
+        keywords:
+          type: array
+          items:
+            type: string
+          description: Keyword boost list for improved transcription accuracy.
+
+    ToolExecution:
+      type: object
+      properties:
+        speakDuringExecution:
+          type: boolean
+          default: false
+          description: Whether the agent speaks a filler while the tool executes.
+        speakAfterExecution:
+          type: boolean
+          default: true
+          description: Whether the agent speaks a response after tool completion.
+        executionMessage:
+          type: string
+          description: Custom message to speak during execution.
+        timeoutMs:
+          type: integer
+          minimum: 1
+          default: 120000
+          description: Maximum execution time in milliseconds.
+
+    ToolPipelineStep:
+      type: object
+      required: [step, server, parameters]
+      properties:
+        step:
+          type: string
+        server:
+          type: object
+          required: [url]
+          properties:
+            url:
+              type: string
+              format: uri
+            timeoutMs:
+              type: integer
+              minimum: 1
+        parameters:
+          type: object
+          additionalProperties:
+            type: string
+        condition:
+          type: string
+
+    FunctionTool:
+      type: object
+      required: [type, function]
+      properties:
+        type:
+          type: string
+          enum: [function]
+        function:
+          type: object
+          required: [name, description, parameters]
+          properties:
+            name:
+              type: string
+              pattern: '^[a-zA-Z_][a-zA-Z0-9_]*$'
+              description: Function name (alphanumeric and underscores).
+            description:
+              type: string
+              description: Description of what the tool does.
+            parameters:
+              type: object
+              required: [type, properties]
+              properties:
+                type:
+                  type: string
+                  enum: [object]
+                properties:
+                  type: object
+                  additionalProperties: true
+                required:
+                  type: array
+                  items:
+                    type: string
+        server:
+          type: object
+          properties:
+            url:
+              type: string
+              format: uri
+              description: Webhook URL to call when the tool is invoked.
+            timeoutMs:
+              type: integer
+              minimum: 1
+              default: 5000
+            retries:
+              type: integer
+              minimum: 0
+              maximum: 5
+              default: 2
+            headers:
+              type: object
+              additionalProperties:
+                type: string
+              description: Custom headers sent with the webhook request.
+        execution:
+          $ref: '#/components/schemas/ToolExecution'
+        responseVariables:
+          type: object
+          additionalProperties:
+            type: string
+          description: Map tool response fields to dynamic variables.
+        pipeline:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolPipelineStep'
+          description: Multi-step pipeline for complex tool workflows.
+
+    TransferCallTool:
+      type: object
+      required: [type, name]
+      properties:
+        type:
+          type: string
+          enum: [transfer_call]
+        name:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_]*$'
+        description:
+          type: string
+        destination:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [predefined, dynamic]
+              default: predefined
+            number:
+              type: string
+              description: Phone number to transfer to (when type is predefined).
+        transferOption:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [warm_transfer, cold_transfer]
+              default: warm_transfer
+            holdMusic:
+              type: string
+              enum: [none, uplifting_beats, classical, jazz]
+              default: none
+            handoffPrompt:
+              type: string
+              description: Prompt spoken to the receiving agent during warm transfer.
+            showTransfereeAsCaller:
+              type: boolean
+              default: false
+            agentDetectionTimeoutMs:
+              type: integer
+              minimum: 1
+              default: 30000
+        execution:
+          $ref: '#/components/schemas/ToolExecution'
+
+    AgentTransferTool:
+      type: object
+      required: [type, name, agentId]
+      properties:
+        type:
+          type: string
+          enum: [agent_transfer]
+        name:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_]*$'
+        description:
+          type: string
+        agentId:
+          type: string
+          description: Target agent ID to transfer the call to.
+        webhookSetting:
+          type: string
+          enum: [both_agents, only_destination, only_source]
+          default: both_agents
+        postCallAnalysisSetting:
+          type: string
+          enum: [both_agents, only_destination, only_source]
+          default: both_agents
+        execution:
+          $ref: '#/components/schemas/ToolExecution'
+
+    Tool:
+      oneOf:
+        - $ref: '#/components/schemas/FunctionTool'
+        - $ref: '#/components/schemas/TransferCallTool'
+        - $ref: '#/components/schemas/AgentTransferTool'
+      discriminator:
+        propertyName: type
+        mapping:
+          function: '#/components/schemas/FunctionTool'
+          transfer_call: '#/components/schemas/TransferCallTool'
+          agent_transfer: '#/components/schemas/AgentTransferTool'
+
+    Settings:
+      type: object
+      properties:
+        responsiveness:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.8
+          description: How quickly the agent responds (0 = slow, 1 = fast).
+        interruptionSensitivity:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.7
+          description: Sensitivity to user interruptions.
+        backchanneling:
+          type: boolean
+          default: false
+          description: Whether the agent uses backchanneling cues (e.g. "uh-huh").
+        backchannelingWords:
+          type: array
+          items:
+            type: string
+          description: Custom backchannel words.
+        endCallAfterSilenceMs:
+          type: integer
+          minimum: 1
+          default: 30000
+          description: End call after this many milliseconds of silence.
+        maxCallDurationMs:
+          type: integer
+          minimum: 1
+          default: 3600000
+          description: Maximum call duration in milliseconds (default 1 hour).
+        voicemailDetection:
+          type: boolean
+          default: false
+          description: Whether to detect voicemail and respond accordingly.
+        voicemailMessage:
+          type: string
+          description: Message to leave on voicemail when detected.
+        ambientSound:
+          type: string
+          enum: [none, office, call-center, cafe]
+          default: none
+          description: Background ambient sound during calls.
+        language:
+          type: string
+          default: en-US
+          description: Language for the conversation.
+        speechNormalization:
+          type: boolean
+          default: true
+          description: Normalize speech patterns (e.g. numbers, dates).
+        denoising:
+          type: string
+          enum: [none, noise-cancel, full]
+          default: none
+          description: Audio denoising level.
+        turnDetection:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [fixed, greedy]
+              default: greedy
+            endpointingMs:
+              type: integer
+              minimum: 100
+              maximum: 2000
+              default: 300
+              description: Silence duration before endpoint detection.
+            utteranceEndMs:
+              type: integer
+              minimum: 200
+              maximum: 5000
+              default: 1000
+              description: Maximum utterance end silence.
+            greedyCommitOnFirstAudio:
+              type: boolean
+              default: true
+            maxRestarts:
+              type: integer
+              minimum: 0
+              maximum: 10
+              default: 3
+        rag:
+          type: object
+          properties:
+            topK:
+              type: integer
+              minimum: 1
+              maximum: 10
+              default: 3
+              description: Number of RAG chunks to retrieve.
+            threshold:
+              type: number
+              minimum: 0
+              maximum: 1
+              default: 0.7
+              description: Minimum similarity threshold for RAG results.
+            contextTemplate:
+              type: string
+              maxLength: 500
+              default: '[RELEVANT CONTEXT]\n{{chunks}}\n[/RELEVANT CONTEXT]'
+              description: Template for injecting RAG context into the prompt.
+
+    EndpointDetection:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [fixed, smart]
+          default: fixed
+        minSilenceMs:
+          type: integer
+          minimum: 1
+          description: Minimum silence in ms before end-of-turn.
+        semanticCompletion:
+          type: boolean
+          description: Use semantic analysis to detect turn completion.
+        utterancePrediction:
+          type: boolean
+          description: Predict end of utterance using audio features.
+
+    PostCallAnalysisField:
+      type: object
+      required: [name, type, description]
+      properties:
+        name:
+          type: string
+          description: Field name for the extracted data.
+        type:
+          type: string
+          enum: [string, enum, boolean, number]
+          description: Data type of the extracted field.
+        description:
+          type: string
+          description: Description of what to extract.
+        choices:
+          type: array
+          items:
+            type: string
+          description: Valid choices (for enum type).
+        examples:
+          type: array
+          items:
+            type: string
+          description: Example values to guide extraction.
+
+    Memory:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        strategy:
+          type: string
+          enum: [per-contact, per-number, global]
+          default: per-contact
+          description: Memory grouping strategy.
+        retentionDays:
+          type: integer
+          minimum: 1
+          default: 90
+        maxTokens:
+          type: integer
+          minimum: 1
+          default: 2000
+        autoSummarize:
+          type: boolean
+          default: true
+
+    PronunciationEntry:
+      type: object
+      required: [word, alphabet, phoneme]
+      properties:
+        word:
+          type: string
+        alphabet:
+          type: string
+          enum: [ipa, cmu]
+        phoneme:
+          type: string
+
+    # =========================================================================
+    # Agent – Request / Response
+    # =========================================================================
+    CreateAgentRequest:
+      type: object
+      required: [name, model, voice]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Human-readable agent name.
+        model:
+          $ref: '#/components/schemas/ModelConfig'
+        voice:
+          $ref: '#/components/schemas/VoiceConfig'
+        transcriber:
+          $ref: '#/components/schemas/TranscriberConfig'
+        firstMessage:
+          type: string
+          description: Greeting the agent speaks when the call connects.
+        firstMessageDelay:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          description: Delay in ms before speaking the first message.
+        settings:
+          $ref: '#/components/schemas/Settings'
+        endpointDetection:
+          $ref: '#/components/schemas/EndpointDetection'
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tool'
+          description: Tools available to the agent during calls.
+        serverUrl:
+          type: string
+          format: uri
+          description: Default webhook server URL for function tools.
+        postCallAnalysis:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostCallAnalysisField'
+          description: Fields to extract after the call ends.
+        memory:
+          $ref: '#/components/schemas/Memory'
+        pronunciationDictionary:
+          type: array
+          items:
+            $ref: '#/components/schemas/PronunciationEntry'
+          description: Custom pronunciation overrides.
+        knowledgeBaseId:
+          type: string
+          description: Single knowledge base ID (legacy). Use knowledgeBaseIds instead.
+        knowledgeBaseIds:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 50
+          maxItems: 10
+          description: Knowledge base IDs to attach for RAG.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    UpdateAgentRequest:
+      description: All fields from CreateAgentRequest, all optional.
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        model:
+          $ref: '#/components/schemas/ModelConfig'
+        voice:
+          $ref: '#/components/schemas/VoiceConfig'
+        transcriber:
+          $ref: '#/components/schemas/TranscriberConfig'
+        firstMessage:
+          type: string
+        firstMessageDelay:
+          type: integer
+          minimum: 0
+          maximum: 5000
+        settings:
+          $ref: '#/components/schemas/Settings'
+        endpointDetection:
+          $ref: '#/components/schemas/EndpointDetection'
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tool'
+        serverUrl:
+          type: string
+          format: uri
+        postCallAnalysis:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostCallAnalysisField'
+        memory:
+          $ref: '#/components/schemas/Memory'
+        pronunciationDictionary:
+          type: array
+          items:
+            $ref: '#/components/schemas/PronunciationEntry'
+        knowledgeBaseId:
+          type: string
+        knowledgeBaseIds:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 50
+          maxItems: 10
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    Agent:
+      type: object
+      required: [id, orgId, name, model, voice, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Unique agent identifier (prefixed with "agent_").
+        orgId:
+          type: string
+          description: Organization that owns this agent.
+        name:
+          type: string
+        model:
+          $ref: '#/components/schemas/ModelConfig'
+        voice:
+          $ref: '#/components/schemas/VoiceConfig'
+        transcriber:
+          $ref: '#/components/schemas/TranscriberConfig'
+        firstMessage:
+          type: string
+        firstMessageDelay:
+          type: integer
+        settings:
+          $ref: '#/components/schemas/Settings'
+        endpointDetection:
+          $ref: '#/components/schemas/EndpointDetection'
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tool'
+        serverUrl:
+          type: string
+          format: uri
+        postCallAnalysis:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostCallAnalysisField'
+        memory:
+          $ref: '#/components/schemas/Memory'
+        pronunciationDictionary:
+          type: array
+          items:
+            $ref: '#/components/schemas/PronunciationEntry'
+        knowledgeBaseId:
+          type: string
+        knowledgeBaseIds:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+          description: Current version number.
+        isPublished:
+          type: boolean
+          description: Whether this agent is live.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # =========================================================================
+    # Agent Versions
+    # =========================================================================
+    ActivateVersionRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          description: Optional notes for the activation or rollback.
+
+    AgentVersion:
+      type: object
+      required: [id, agentId, versionNumber, systemPrompt, createdAt]
+      properties:
+        id:
+          type: string
+          description: Unique version record identifier (prefixed with "av_").
+        agentId:
+          type: string
+        versionNumber:
+          type: integer
+        systemPrompt:
+          type: string
+        modelConfig:
+          type: object
+          additionalProperties: true
+          description: Snapshot of the model configuration at this version.
+        notes:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    # =========================================================================
+    # Composed Agents
+    # =========================================================================
+    CompositionAgent:
+      type: object
+      required: [id, role]
+      properties:
+        id:
+          type: string
+          description: Agent ID participating in the composition.
+        role:
+          type: string
+          description: Role label for this agent within the composition.
+
+    CompositionTransition:
+      type: object
+      required: [from, to, condition]
+      properties:
+        from:
+          type: string
+          description: Source agent ID or role.
+        to:
+          type: string
+          description: Target agent ID or role.
+        condition:
+          type: string
+          description: Condition expression that triggers the transition.
+
+    CreateComposedAgentRequest:
+      type: object
+      required: [name, routerAgentId, agents, transitions]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        routerAgentId:
+          type: string
+          description: Agent that handles initial routing decisions.
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompositionAgent'
+          description: Agents participating in the composition.
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompositionTransition'
+          description: Rules governing agent-to-agent transitions.
+        sharedContext:
+          type: boolean
+          default: true
+          description: Whether agents share conversation context.
+        seamlessHandoff:
+          type: boolean
+          default: true
+          description: Whether handoffs are seamless (no hold music).
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    UpdateComposedAgentRequest:
+      description: All fields from CreateComposedAgentRequest, all optional.
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        routerAgentId:
+          type: string
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompositionAgent'
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompositionTransition'
+        sharedContext:
+          type: boolean
+        seamlessHandoff:
+          type: boolean
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    ComposedAgent:
+      type: object
+      required: [id, orgId, name, routerAgentId, agents, transitions, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Unique composed agent identifier (prefixed with "composed_").
+        orgId:
+          type: string
+        name:
+          type: string
+        routerAgentId:
+          type: string
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompositionAgent'
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompositionTransition'
+        sharedContext:
+          type: boolean
+        seamlessHandoff:
+          type: boolean
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # =========================================================================
+    # Calls
+    # =========================================================================
+    AgentOverride:
+      type: object
+      properties:
+        systemPrompt:
+          type: string
+          description: Override the agent system prompt for this call.
+        voice:
+          type: object
+          properties:
+            voiceId:
+              type: string
+            speed:
+              type: number
+        firstMessage:
+          type: string
+          description: Override the first message for this call.
+
+    CreatePhoneCallRequest:
+      type: object
+      required: [agentId, from, to]
+      properties:
+        agentId:
+          type: string
+          minLength: 1
+          description: Agent to use for this call.
+        from:
+          type: string
+          minLength: 1
+          description: Caller phone number (E.164 format).
+        to:
+          type: string
+          minLength: 1
+          description: Recipient phone number (E.164 format).
+        composedAgentId:
+          type: string
+          minLength: 1
+          description: Optional composed agent ID for multi-agent calls.
+        dynamicVariables:
+          type: object
+          additionalProperties:
+            type: string
+          description: Variables injected into {{mustache}} template placeholders.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        agentOverride:
+          $ref: '#/components/schemas/AgentOverride'
+
+    CreateWebCallRequest:
+      type: object
+      required: [agentId]
+      properties:
+        agentId:
+          type: string
+          minLength: 1
+          description: Agent to use for this call.
+        composedAgentId:
+          type: string
+          minLength: 1
+          description: Optional composed agent ID for multi-agent calls.
+        dynamicVariables:
+          type: object
+          additionalProperties:
+            type: string
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        agentOverride:
+          $ref: '#/components/schemas/AgentOverride'
+
+    WhisperRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Context message to inject to the agent mid-call.
+
+    InterjectRequest:
+      type: object
+      required: [say]
+      properties:
+        say:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Text for the agent to speak immediately.
+        then:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Follow-up instruction after speaking the interjection.
+
+    TerminateRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Reason for terminating the call.
+        finalMessage:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Final message the agent speaks before hanging up.
+
+    Call:
+      type: object
+      required: [id, orgId, type, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Unique call identifier (prefixed with "call_").
+        orgId:
+          type: string
+        agentId:
+          type: string
+        type:
+          type: string
+          enum: [phone, web]
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        status:
+          type: string
+          enum: [queued, ringing, in_progress, completed, failed, no_answer, busy]
+        fromNumber:
+          type: string
+          description: Caller phone number (phone calls only).
+        toNumber:
+          type: string
+          description: Recipient phone number (phone calls only).
+        externalCallId:
+          type: string
+          description: Provider-side call identifier (e.g. Twilio Call SID).
+        endReason:
+          type: string
+          description: Reason the call ended.
+        dynamicVariables:
+          type: object
+          additionalProperties:
+            type: string
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CallActionResponse:
+      type: object
+      required: [callId, action, status]
+      properties:
+        callId:
+          type: string
+        action:
+          type: string
+          enum: [whisper, interject, terminate]
+        status:
+          type: string
+          enum: [delivered]
+
+    # =========================================================================
+    # Knowledge Bases
+    # =========================================================================
+    CreateKnowledgeBaseRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Knowledge base name.
+        description:
+          type: string
+          description: Optional description.
+        embeddingModel:
+          type: string
+          default: text-embedding-3-small
+          description: Embedding model to use for vectorization.
+        chunkSize:
+          type: integer
+          minimum: 100
+          maximum: 2000
+          default: 512
+          description: Number of tokens per chunk.
+        chunkOverlap:
+          type: integer
+          minimum: 0
+          maximum: 500
+          default: 50
+          description: Token overlap between consecutive chunks.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    UpdateKnowledgeBaseRequest:
+      description: All fields from CreateKnowledgeBaseRequest, all optional.
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+        embeddingModel:
+          type: string
+        chunkSize:
+          type: integer
+          minimum: 100
+          maximum: 2000
+        chunkOverlap:
+          type: integer
+          minimum: 0
+          maximum: 500
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    KnowledgeBase:
+      type: object
+      required: [id, orgId, name, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Unique knowledge base identifier (prefixed with "kb_").
+        orgId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        embeddingModel:
+          type: string
+        chunkSize:
+          type: integer
+        chunkOverlap:
+          type: integer
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AddFileRequest:
+      type: object
+      required: [filename, mimeType]
+      properties:
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Original filename.
+        mimeType:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: MIME type of the file.
+        sizeBytes:
+          type: integer
+          minimum: 1
+          description: File size in bytes.
+        content:
+          type: string
+          description: Inline text content to process. If provided, the file is enqueued for chunking.
+
+    KnowledgeBaseFile:
+      type: object
+      required: [id, knowledgeBaseId, filename, mimeType, createdAt]
+      properties:
+        id:
+          type: string
+          description: Unique file identifier (prefixed with "kbf_").
+        knowledgeBaseId:
+          type: string
+        filename:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+          description: File processing status.
+        createdAt:
+          type: string
+          format: date-time
+
+    QueryKnowledgeBaseRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          description: Natural language query to search the knowledge base.
+        topK:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 3
+          description: Number of results to return.
+
+    KnowledgeBaseChunk:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+          description: Text content of the chunk.
+        score:
+          type: number
+          description: Similarity score (0-1).
+        fileId:
+          type: string
+        filename:
+          type: string
+
+    # =========================================================================
+    # Campaigns
+    # =========================================================================
+    Schedule:
+      type: object
+      properties:
+        startAt:
+          type: string
+          description: ISO 8601 timestamp to start the campaign.
+        endAt:
+          type: string
+          description: ISO 8601 timestamp to stop the campaign.
+        callingHours:
+          type: object
+          properties:
+            start:
+              type: string
+              pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+              description: Earliest call time (HH:MM format).
+            end:
+              type: string
+              pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+              description: Latest call time (HH:MM format).
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 6
+          description: Days to run (0=Sunday, 6=Saturday).
+        maxConcurrent:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+          description: Maximum concurrent calls.
+        callsPerMinute:
+          type: integer
+          minimum: 1
+          maximum: 60
+          default: 5
+          description: Rate limit for outbound calls.
+
+    RetryPolicy:
+      type: object
+      properties:
+        maxAttempts:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 3
+          description: Maximum retry attempts per contact.
+        delayMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          default: 60
+          description: Delay between retries in minutes.
+        retryOn:
+          type: array
+          items:
+            type: string
+            enum: [no_answer, busy, failed]
+          description: Call outcomes that trigger a retry.
+
+    CreateCampaignRequest:
+      type: object
+      required: [name, agentId, fromNumber, schedule]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        agentId:
+          type: string
+          minLength: 1
+          description: Agent to use for campaign calls.
+        fromNumber:
+          type: string
+          minLength: 1
+          description: Outbound caller ID (E.164 format).
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+        retryPolicy:
+          $ref: '#/components/schemas/RetryPolicy'
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    UpdateCampaignRequest:
+      description: All fields from CreateCampaignRequest, all optional.
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        agentId:
+          type: string
+          minLength: 1
+        fromNumber:
+          type: string
+          minLength: 1
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+        retryPolicy:
+          $ref: '#/components/schemas/RetryPolicy'
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    ContactItem:
+      type: object
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          type: string
+          minLength: 1
+          description: Contact phone number (E.164 format).
+        dynamicVariables:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-contact template variables.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    UploadContactsRequest:
+      type: object
+      required: [contacts]
+      properties:
+        contacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContactItem'
+          minItems: 1
+          maxItems: 10000
+          description: Contacts to add to the campaign.
+
+    Campaign:
+      type: object
+      required: [id, orgId, name, agentId, fromNumber, status, schedule, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Unique campaign identifier (prefixed with "camp_").
+        orgId:
+          type: string
+        name:
+          type: string
+        agentId:
+          type: string
+        fromNumber:
+          type: string
+        status:
+          type: string
+          enum: [draft, running, paused, completed, cancelled]
+        schedule:
+          $ref: '#/components/schemas/Schedule'
+        retryPolicy:
+          $ref: '#/components/schemas/RetryPolicy'
+        totalContacts:
+          type: integer
+        completedCalls:
+          type: integer
+        successfulCalls:
+          type: integer
+        failedCalls:
+          type: integer
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CampaignResults:
+      type: object
+      required: [campaignId, status, stats]
+      properties:
+        campaignId:
+          type: string
+        status:
+          type: string
+          enum: [draft, running, paused, completed, cancelled]
+        stats:
+          type: object
+          required: [totalContacts, completed, failed, pending, inProgress, successRate, completedCalls, successfulCalls, failedCalls]
+          properties:
+            totalContacts:
+              type: integer
+            completed:
+              type: integer
+            failed:
+              type: integer
+            pending:
+              type: integer
+            inProgress:
+              type: integer
+            successRate:
+              type: number
+              description: Ratio of completed to total contacts (0-1).
+            completedCalls:
+              type: integer
+            successfulCalls:
+              type: integer
+            failedCalls:
+              type: integer
+
+    # =========================================================================
+    # A/B Tests
+    # =========================================================================
+    Variant:
+      type: object
+      required: [agentId]
+      properties:
+        agentId:
+          type: string
+          minLength: 1
+          description: Agent ID for this variant.
+        version:
+          type: integer
+          minimum: 1
+          description: Specific agent version to use.
+        label:
+          type: string
+          description: Human-readable label for this variant.
+
+    TrafficSplit:
+      type: object
+      required: [a, b]
+      properties:
+        a:
+          type: integer
+          minimum: 1
+          maximum: 99
+          description: Percentage of traffic for variant A.
+        b:
+          type: integer
+          minimum: 1
+          maximum: 99
+          description: Percentage of traffic for variant B.
+      description: Traffic split must sum to 100.
+
+    CreateAbTestRequest:
+      type: object
+      required: [name, variantA, variantB, trafficSplit, successMetric]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+        variantA:
+          $ref: '#/components/schemas/Variant'
+        variantB:
+          $ref: '#/components/schemas/Variant'
+        trafficSplit:
+          $ref: '#/components/schemas/TrafficSplit'
+        phoneNumbers:
+          type: array
+          items:
+            type: string
+          description: Phone numbers to include in the test.
+        successMetric:
+          type: string
+          enum: [duration, sentiment, tool_success, custom]
+          description: Primary metric for determining the winner.
+
+    UpdateAbTestRequest:
+      description: All fields from CreateAbTestRequest, all optional.
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+        variantA:
+          $ref: '#/components/schemas/Variant'
+        variantB:
+          $ref: '#/components/schemas/Variant'
+        trafficSplit:
+          $ref: '#/components/schemas/TrafficSplit'
+        phoneNumbers:
+          type: array
+          items:
+            type: string
+        successMetric:
+          type: string
+          enum: [duration, sentiment, tool_success, custom]
+
+    AbTest:
+      type: object
+      required: [id, orgId, name, variantA, variantB, trafficSplit, successMetric, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Unique A/B test identifier (prefixed with "abt_").
+        orgId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        variantA:
+          $ref: '#/components/schemas/Variant'
+        variantB:
+          $ref: '#/components/schemas/Variant'
+        trafficSplit:
+          $ref: '#/components/schemas/TrafficSplit'
+        phoneNumbers:
+          type: array
+          items:
+            type: string
+        successMetric:
+          type: string
+          enum: [duration, sentiment, tool_success, custom]
+        status:
+          type: string
+          enum: [draft, running, completed]
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # =========================================================================
+    # Phone Numbers
+    # =========================================================================
+    CreatePhoneNumberRequest:
+      type: object
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          type: string
+          minLength: 1
+          description: Phone number in E.164 format.
+        provider:
+          type: string
+          enum: [twilio, telnyx, vonage]
+          default: twilio
+          description: Telephony provider.
+        inboundAgentId:
+          type: string
+          description: Agent to handle inbound calls on this number.
+        outboundAgentId:
+          type: string
+          description: Default agent for outbound calls from this number.
+        webhookUrl:
+          type: string
+          format: uri
+          description: Custom webhook URL for call events on this number.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    UpdatePhoneNumberRequest:
+      type: object
+      properties:
+        inboundAgentId:
+          type: string
+          nullable: true
+          description: Agent to handle inbound calls. Set to null to unassign.
+        outboundAgentId:
+          type: string
+          nullable: true
+          description: Default agent for outbound calls. Set to null to unassign.
+        webhookUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: Custom webhook URL. Set to null to remove.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    ProvisionPhoneNumberRequest:
+      type: object
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          type: string
+          minLength: 1
+          description: Phone number to purchase and provision (E.164 format).
+        provider:
+          type: string
+          enum: [twilio, telnyx]
+          default: twilio
+          description: Telephony provider to purchase from.
+        inboundAgentId:
+          type: string
+          description: Agent to handle inbound calls on the provisioned number.
+        outboundAgentId:
+          type: string
+          description: Default agent for outbound calls from the provisioned number.
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    PhoneNumber:
+      type: object
+      required: [id, orgId, phoneNumber, provider, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: Unique phone number record identifier (prefixed with "pn_").
+        orgId:
+          type: string
+        phoneNumber:
+          type: string
+        provider:
+          type: string
+          enum: [twilio, telnyx, vonage]
+        inboundAgentId:
+          type: string
+        outboundAgentId:
+          type: string
+        webhookUrl:
+          type: string
+          format: uri
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AvailablePhoneNumber:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          description: Available phone number in E.164 format.
+        friendlyName:
+          type: string
+        region:
+          type: string
+        capabilities:
+          type: object
+          properties:
+            voice:
+              type: boolean
+            sms:
+              type: boolean
+            mms:
+              type: boolean
+
+    # =========================================================================
+    # Usage
+    # =========================================================================
+    UsageSummary:
+      type: object
+      required: [totalCost, totalCalls, totalMinutes, startDate, endDate]
+      properties:
+        totalCost:
+          type: number
+          description: Total cost in dollars for the period.
+        totalCalls:
+          type: integer
+          description: Total number of calls.
+        totalMinutes:
+          type: number
+          description: Total call minutes.
+        breakdown:
+          type: object
+          additionalProperties: true
+          description: Cost breakdown by provider or category.
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+
+    DailyUsage:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        calls:
+          type: integer
+        minutes:
+          type: number
+        cost:
+          type: number
+          description: Cost in dollars for this day.
+
+    AgentUsage:
+      type: object
+      properties:
+        agentId:
+          type: string
+        agentName:
+          type: string
+        calls:
+          type: integer
+        minutes:
+          type: number
+        cost:
+          type: number
+          description: Cost in dollars for this agent.

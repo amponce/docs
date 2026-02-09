@@ -1,0 +1,362 @@
+---
+title: "Campaigns"
+sidebarTitle: "Campaigns"
+description: "Run batch outbound calling campaigns with scheduling, retry logic, and concurrency controls."
+---
+
+## Overview
+
+Campaigns let you make thousands of outbound calls automatically. Define a list of contacts, assign an agent, set calling hours and retry policies, then start the campaign. Relay Agent handles the rest -- pacing calls, retrying failures, and tracking results.
+
+Campaigns are processed by BullMQ workers, giving you durable execution with at-least-once delivery guarantees.
+
+## Campaign Lifecycle
+
+```
+draft --> running --> completed
+            |    \
+            v     --> cancelled
+          paused
+            |
+            v
+          running (resumed)
+```
+
+| Status | Description |
+|---|---|
+| `draft` | Created but not started. Contacts can be uploaded and settings modified. |
+| `running` | Actively making calls. Contacts are dialed according to the schedule. |
+| `paused` | Temporarily stopped. No new calls are initiated. In-progress calls continue. |
+| `completed` | All contacts have been called (or max retries exhausted). |
+| `cancelled` | Permanently stopped. Cannot be resumed. |
+
+## Create a Campaign
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://your-host/v1/campaigns \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "January Onboarding",
+    "agentId": "agent_abc123def456",
+    "fromNumber": "+14155551234",
+    "schedule": {
+      "startAt": "2026-02-10T09:00:00Z",
+      "endAt": "2026-02-14T17:00:00Z",
+      "callingHours": {
+        "start": "09:00",
+        "end": "17:00"
+      },
+      "daysOfWeek": [1, 2, 3, 4, 5],
+      "maxConcurrent": 10,
+      "callsPerMinute": 5
+    },
+    "retryPolicy": {
+      "maxAttempts": 3,
+      "delayMinutes": 60,
+      "retryOn": ["no_answer", "busy", "failed"]
+    }
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch("https://your-host/v1/campaigns", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer ra_your_api_key",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    name: "January Onboarding",
+    agentId: "agent_abc123def456",
+    fromNumber: "+14155551234",
+    schedule: {
+      startAt: "2026-02-10T09:00:00Z",
+      endAt: "2026-02-14T17:00:00Z",
+      callingHours: { start: "09:00", end: "17:00" },
+      daysOfWeek: [1, 2, 3, 4, 5],
+      maxConcurrent: 10,
+      callsPerMinute: 5,
+    },
+    retryPolicy: {
+      maxAttempts: 3,
+      delayMinutes: 60,
+      retryOn: ["no_answer", "busy", "failed"],
+    },
+  }),
+});
+
+const campaign = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://your-host/v1/campaigns",
+    headers={
+        "Authorization": "Bearer ra_your_api_key",
+        "Content-Type": "application/json",
+    },
+    json={
+        "name": "January Onboarding",
+        "agentId": "agent_abc123def456",
+        "fromNumber": "+14155551234",
+        "schedule": {
+            "startAt": "2026-02-10T09:00:00Z",
+            "endAt": "2026-02-14T17:00:00Z",
+            "callingHours": {"start": "09:00", "end": "17:00"},
+            "daysOfWeek": [1, 2, 3, 4, 5],
+            "maxConcurrent": 10,
+            "callsPerMinute": 5,
+        },
+        "retryPolicy": {
+            "maxAttempts": 3,
+            "delayMinutes": 60,
+            "retryOn": ["no_answer", "busy", "failed"],
+        },
+    },
+)
+
+campaign = response.json()
+```
+
+</CodeGroup>
+
+### Request Body
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | Yes | Campaign name (max 200 characters). |
+| `agentId` | `string` | Yes | Agent to handle all calls. |
+| `fromNumber` | `string` | Yes | Caller ID phone number in E.164 format. |
+| `schedule` | `object` | Yes | Scheduling configuration. See below. |
+| `retryPolicy` | `object` | No | Retry configuration for failed calls. |
+| `metadata` | `Record<string, unknown>` | No | Arbitrary metadata. |
+
+### Schedule Object
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `startAt` | `string` | - | ISO 8601 start time. Calls begin after this time. |
+| `endAt` | `string` | - | ISO 8601 end time. No new calls after this time. |
+| `callingHours.start` | `string` | - | Daily start time in `HH:MM` format (24h). |
+| `callingHours.end` | `string` | - | Daily end time in `HH:MM` format (24h). |
+| `daysOfWeek` | `number[]` | - | Active days (0=Sunday, 1=Monday, ..., 6=Saturday). |
+| `maxConcurrent` | `number` | `10` | Maximum simultaneous calls (1-100). |
+| `callsPerMinute` | `number` | `5` | Maximum calls initiated per minute (1-60). |
+
+### Retry Policy Object
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `maxAttempts` | `number` | `3` | Total attempts per contact (1-10). |
+| `delayMinutes` | `number` | `60` | Minutes between retry attempts (1-1440). |
+| `retryOn` | `string[]` | - | Retry on these outcomes: `no_answer`, `busy`, `failed`. |
+
+## Upload Contacts
+
+Add contacts to a campaign. You can upload up to **10,000 contacts per request**.
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://your-host/v1/campaigns/{campaignId}/contacts \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contacts": [
+      {
+        "phoneNumber": "+14155559001",
+        "dynamicVariables": {
+          "firstName": "Alice",
+          "appointmentDate": "February 12"
+        }
+      },
+      {
+        "phoneNumber": "+14155559002",
+        "dynamicVariables": {
+          "firstName": "Bob",
+          "appointmentDate": "February 13"
+        }
+      }
+    ]
+  }'
+```
+
+```typescript TypeScript
+const response = await fetch(
+  `https://your-host/v1/campaigns/${campaignId}/contacts`,
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer ra_your_api_key",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contacts: [
+        {
+          phoneNumber: "+14155559001",
+          dynamicVariables: {
+            firstName: "Alice",
+            appointmentDate: "February 12",
+          },
+        },
+        {
+          phoneNumber: "+14155559002",
+          dynamicVariables: {
+            firstName: "Bob",
+            appointmentDate: "February 13",
+          },
+        },
+      ],
+    }),
+  }
+);
+
+const result = await response.json();
+// { uploaded: 2, totalContacts: 2 }
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    f"https://your-host/v1/campaigns/{campaign_id}/contacts",
+    headers={
+        "Authorization": "Bearer ra_your_api_key",
+        "Content-Type": "application/json",
+    },
+    json={
+        "contacts": [
+            {
+                "phoneNumber": "+14155559001",
+                "dynamicVariables": {
+                    "firstName": "Alice",
+                    "appointmentDate": "February 12",
+                },
+            },
+            {
+                "phoneNumber": "+14155559002",
+                "dynamicVariables": {
+                    "firstName": "Bob",
+                    "appointmentDate": "February 13",
+                },
+            },
+        ]
+    },
+)
+
+result = response.json()
+```
+
+</CodeGroup>
+
+### Contact Object
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `phoneNumber` | `string` | Yes | Contact phone number in E.164 format. |
+| `dynamicVariables` | `Record<string, string>` | No | Per-contact variables for `{{mustache}}` placeholders. |
+| `metadata` | `Record<string, unknown>` | No | Arbitrary metadata for this contact. |
+
+<Note>
+  You can call the upload endpoint multiple times to add contacts in batches. The `totalContacts` counter accumulates across uploads.
+</Note>
+
+## Start a Campaign
+
+Transition from `draft` to `running`. The agent must exist and belong to your organization.
+
+```bash
+curl -X POST https://your-host/v1/campaigns/{campaignId}/start \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+## Pause a Campaign
+
+Temporarily stop a running campaign. In-progress calls will complete, but no new calls are initiated.
+
+```bash
+curl -X POST https://your-host/v1/campaigns/{campaignId}/pause \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+## Resume a Campaign
+
+Resume a paused campaign. Calling resumes from where it left off.
+
+```bash
+curl -X POST https://your-host/v1/campaigns/{campaignId}/resume \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+## Cancel a Campaign
+
+Permanently stop a running or paused campaign. This cannot be undone.
+
+```bash
+curl -X POST https://your-host/v1/campaigns/{campaignId}/cancel \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+## Get Campaign Results
+
+Retrieve detailed statistics for a campaign:
+
+```bash
+curl "https://your-host/v1/campaigns/{campaignId}/results" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+### Response
+
+```json
+{
+  "campaignId": "camp_aBcDeFgHiJkL",
+  "status": "running",
+  "stats": {
+    "totalContacts": 500,
+    "completed": 312,
+    "failed": 23,
+    "pending": 140,
+    "inProgress": 25,
+    "successRate": 0.624,
+    "completedCalls": 312,
+    "successfulCalls": 289,
+    "failedCalls": 23
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `totalContacts` | Total contacts uploaded to the campaign. |
+| `completed` | Contacts where the call completed successfully. |
+| `failed` | Contacts where all retry attempts were exhausted. |
+| `pending` | Contacts not yet called. |
+| `inProgress` | Contacts currently being called. |
+| `successRate` | Ratio of completed to total contacts (0.0 to 1.0). |
+
+## State Transition Rules
+
+| Action | Allowed From | Transitions To |
+|---|---|---|
+| Start | `draft` | `running` |
+| Pause | `running` | `paused` |
+| Resume | `paused` | `running` |
+| Cancel | `running`, `paused` | `cancelled` |
+| Update | `draft` | `draft` |
+| Delete | `draft`, `cancelled` | (removed) |
+
+<Warning>
+  Campaigns can only be updated while in `draft` status. Once started, you can only pause, resume, or cancel.
+</Warning>
+
+## Next Steps
+
+- [Phone Numbers](/deploy/phone-numbers) -- Manage your caller ID numbers
+- [Webhooks](/deploy/webhooks) -- Get real-time call event notifications
+- [Usage](/monitor/usage) -- Track campaign costs
