@@ -1,0 +1,277 @@
+---
+title: "Tools"
+description: "Configure function calling tools that let your agent take actions during a conversation."
+---
+
+Tools give your agent the ability to take actions during a call -- look up information, book appointments, transfer calls, or hand off to another AI agent. Relay Agent supports three tool types.
+
+| Type | Description |
+|------|-------------|
+| `function` | Call an HTTP webhook with structured parameters |
+| `transfer_call` | Transfer the call to a phone number (human agent) |
+| `agent_transfer` | Hand off to another AI agent |
+
+## Function Tools
+
+Function tools call your HTTP webhook when the LLM decides to invoke them. The tool definition follows the OpenAI function-calling JSON schema format.
+
+```json
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "check_order_status",
+        "description": "Look up the status of a customer's order by order ID.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "orderId": {
+              "type": "string",
+              "description": "The order ID (e.g., ORD-12345)"
+            }
+          },
+          "required": ["orderId"]
+        }
+      },
+      "server": {
+        "url": "https://api.yourcompany.com/tools/order-status",
+        "timeoutMs": 5000,
+        "retries": 2,
+        "headers": {
+          "X-Tool-Auth": "secret-token"
+        }
+      },
+      "execution": {
+        "speakDuringExecution": true,
+        "speakAfterExecution": true,
+        "executionMessage": "Let me look that up for you.",
+        "timeoutMs": 120000
+      },
+      "responseVariables": {
+        "orderStatus": "$.status",
+        "estimatedDelivery": "$.delivery.eta"
+      }
+    }
+  ]
+}
+```
+
+### Function Definition
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"function"` | Yes | Must be `"function"`. |
+| `function.name` | `string` | Yes | Unique name. Must match `^[a-zA-Z_][a-zA-Z0-9_]*$`. |
+| `function.description` | `string` | Yes | Tells the LLM when and how to use this tool. |
+| `function.parameters` | `object` | Yes | JSON Schema defining the parameters. Must have `type: "object"`. |
+
+### Server Configuration
+
+The `server` object tells Relay Agent where to send the tool call.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `server.url` | `string` | Agent's `serverUrl` | Webhook URL to call. |
+| `server.timeoutMs` | `number` | `5000` | HTTP request timeout in milliseconds. |
+| `server.retries` | `number` | `2` | Number of retries on failure (0-5). |
+| `server.headers` | `object` | - | Custom headers to include in the webhook request. |
+
+If `server` is omitted, the tool call is sent to the agent's top-level `serverUrl`.
+
+### Execution Settings
+
+Control what happens during tool execution.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `execution.speakDuringExecution` | `boolean` | `false` | Whether the agent speaks while waiting for the tool response. |
+| `execution.speakAfterExecution` | `boolean` | `true` | Whether the agent speaks after receiving the tool response. |
+| `execution.executionMessage` | `string` | - | A specific phrase to say while the tool executes (e.g., "One moment please"). |
+| `execution.timeoutMs` | `number` | `120000` | Maximum time to wait for tool completion in milliseconds. |
+
+### Response Variables
+
+Map fields from the tool's JSON response into variables that the agent can reference in subsequent conversation turns.
+
+```json
+{
+  "responseVariables": {
+    "orderStatus": "$.status",
+    "estimatedDelivery": "$.delivery.eta"
+  }
+}
+```
+
+The values use JSONPath-style dot notation to extract fields from the webhook response body.
+
+### Webhook Request Format
+
+When a function tool is invoked, Relay Agent sends a POST request to the configured URL:
+
+```json
+{
+  "tool": "check_order_status",
+  "arguments": {
+    "orderId": "ORD-12345"
+  },
+  "callId": "call_abc123",
+  "agentId": "agent_def456"
+}
+```
+
+Your webhook should respond with a JSON body:
+
+```json
+{
+  "status": "shipped",
+  "delivery": {
+    "eta": "2026-02-10",
+    "carrier": "UPS"
+  }
+}
+```
+
+### Pipeline Tools
+
+For complex workflows that require multiple sequential HTTP calls, use the `pipeline` field:
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "book_appointment",
+    "description": "Book an appointment for the caller.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "service": { "type": "string" }
+      },
+      "required": ["date", "time", "service"]
+    }
+  },
+  "pipeline": [
+    {
+      "step": "check_availability",
+      "server": {
+        "url": "https://api.example.com/availability",
+        "timeoutMs": 3000
+      },
+      "parameters": {
+        "date": "\{\{date\}\}",
+        "time": "\{\{time\}\}"
+      },
+      "condition": "always"
+    },
+    {
+      "step": "create_booking",
+      "server": {
+        "url": "https://api.example.com/bookings",
+        "timeoutMs": 5000
+      },
+      "parameters": {
+        "date": "\{\{date\}\}",
+        "time": "\{\{time\}\}",
+        "service": "\{\{service\}\}"
+      },
+      "condition": "available == true"
+    }
+  ]
+}
+```
+
+Each step in the pipeline runs sequentially. Steps can reference parameters from the original tool call and include conditions for conditional execution.
+
+## Transfer Call Tools
+
+Transfer the call to a human agent at a phone number. See [Transfer Calls](/build/transfer-calls) for a complete guide.
+
+```json
+{
+  "tools": [
+    {
+      "type": "transfer_call",
+      "name": "transfer_to_support",
+      "description": "Transfer the caller to a human support agent when the issue cannot be resolved by AI.",
+      "destination": {
+        "type": "predefined",
+        "number": "+15551234567"
+      },
+      "transferOption": {
+        "type": "warm_transfer",
+        "holdMusic": "jazz",
+        "handoffPrompt": "I have a customer who needs help with a billing issue. Their account ID is...",
+        "agentDetectionTimeoutMs": 30000
+      },
+      "execution": {
+        "executionMessage": "I'm going to transfer you to a specialist who can help with this. Please hold for a moment."
+      }
+    }
+  ]
+}
+```
+
+### Transfer Call Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"transfer_call"` | Yes | Must be `"transfer_call"`. |
+| `name` | `string` | Yes | Unique name matching `^[a-zA-Z_][a-zA-Z0-9_]*$`. |
+| `description` | `string` | No | Tells the LLM when to transfer. |
+| `destination.type` | `string` | No | `"predefined"` (fixed number) or `"dynamic"` (LLM decides). Default: `"predefined"`. |
+| `destination.number` | `string` | No | Phone number to transfer to (required if type is `predefined`). |
+| `transferOption.type` | `string` | No | `"warm_transfer"` or `"cold_transfer"`. Default: `"warm_transfer"`. |
+| `transferOption.holdMusic` | `string` | No | Music while on hold: `none`, `uplifting_beats`, `classical`, `jazz`. Default: `"none"`. |
+| `transferOption.handoffPrompt` | `string` | No | Context whispered to the human agent before connecting. |
+| `transferOption.showTransfereeAsCaller` | `boolean` | No | Show original caller ID to the transfer target. Default: `false`. |
+| `transferOption.agentDetectionTimeoutMs` | `number` | No | How long to wait for the human agent to answer. Default: `30000`. |
+
+## Agent Transfer Tools
+
+Hand off to another AI agent within a composition. See [Agent Transfers](/build/agent-transfers) for a complete guide.
+
+```json
+{
+  "tools": [
+    {
+      "type": "agent_transfer",
+      "name": "transfer_to_billing",
+      "description": "Transfer to the billing specialist agent when the caller has payment or invoice questions.",
+      "agentId": "agent_billing_001",
+      "webhookSetting": "both_agents",
+      "postCallAnalysisSetting": "both_agents",
+      "execution": {
+        "executionMessage": "Let me connect you with our billing specialist."
+      }
+    }
+  ]
+}
+```
+
+### Agent Transfer Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"agent_transfer"` | Yes | Must be `"agent_transfer"`. |
+| `name` | `string` | Yes | Unique name matching `^[a-zA-Z_][a-zA-Z0-9_]*$`. |
+| `description` | `string` | No | Tells the LLM when to transfer. |
+| `agentId` | `string` | Yes | The ID of the destination agent. |
+| `webhookSetting` | `string` | No | Which agents receive webhooks: `both_agents`, `only_destination`, `only_source`. Default: `"both_agents"`. |
+| `postCallAnalysisSetting` | `string` | No | Which agents run post-call analysis: `both_agents`, `only_destination`, `only_source`. Default: `"both_agents"`. |
+
+## Execution Settings (All Tool Types)
+
+All three tool types support the same `execution` settings:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `speakDuringExecution` | `boolean` | `false` | Agent speaks while the tool runs. |
+| `speakAfterExecution` | `boolean` | `true` | Agent speaks after the tool completes. |
+| `executionMessage` | `string` | - | Specific phrase to say during execution. |
+| `timeoutMs` | `number` | `120000` | Maximum execution time (ms). |
+
+<Callout type="info" title="Tip">
+  Use `executionMessage` to fill silence during tool execution. Without it, there is dead air while the webhook processes, which feels unnatural in a voice conversation. A simple "One moment please" or "Let me look that up" makes a big difference.
+</Callout>

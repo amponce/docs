@@ -1,0 +1,152 @@
+---
+title: "Models"
+description: "Configure LLM providers and models for your voice AI agents."
+---
+
+The `model` object in your agent configuration controls which large language model powers the conversation. Relay Agent supports multiple LLM providers, giving you flexibility to choose the best model for your use case.
+
+## Supported Providers
+
+| Provider | Value | Popular Models |
+|----------|-------|----------------|
+| OpenAI | `openai` | `gpt-4o-mini`, `gpt-4o`, `gpt-4-turbo` |
+| Anthropic | `anthropic` | `claude-3-haiku-20240307`, `claude-sonnet-4-20250514` |
+| Google | `google` | `gemini-1.5-flash`, `gemini-1.5-pro` |
+| Groq | `groq` | `llama-3.1-8b-instant`, `llama-3.1-70b-versatile` |
+| Together | `together` | `meta-llama/Llama-3.1-8B-Instruct-Turbo` |
+
+## Configuration
+
+```json
+{
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "temperature": 0.7,
+    "maxTokens": 1024,
+    "systemPrompt": "You are a helpful assistant."
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | `string` | Yes | One of: `openai`, `anthropic`, `google`, `groq`, `together`. |
+| `model` | `string` | Yes | The model identifier. Must be a valid model for the chosen provider. |
+| `temperature` | `number` | No | Controls randomness. Range: 0-2. Lower values produce more focused responses. |
+| `maxTokens` | `number` | No | Maximum number of tokens in the response. Must be a positive integer. |
+| `systemPrompt` | `string` | Yes | Instructions that define the agent's behavior. See [System Prompts](/build/system-prompts). |
+
+## Model Recommendations for Voice
+
+Voice AI has strict latency requirements. The round-trip time from user speech to agent response needs to stay under 1 second for natural conversation. Model selection has a significant impact on this.
+
+### Fast Models (Recommended for Production)
+
+These models offer the best latency for real-time voice:
+
+| Model | Provider | Latency | Best For |
+|-------|----------|---------|----------|
+| `gpt-4o-mini` | OpenAI | ~200-400ms | General purpose, best price/performance |
+| `claude-3-haiku-20240307` | Anthropic | ~200-400ms | Fast responses, good instruction following |
+| `llama-3.1-8b-instant` | Groq | ~100-200ms | Ultra-low latency via Groq's LPU hardware |
+| `gemini-1.5-flash` | Google | ~200-400ms | Fast, good multilingual support |
+
+### High-Quality Models (Complex Tasks)
+
+Use these when quality matters more than speed, or for post-call analysis:
+
+| Model | Provider | Latency | Best For |
+|-------|----------|---------|----------|
+| `gpt-4o` | OpenAI | ~400-800ms | Complex reasoning, nuanced conversations |
+| `claude-sonnet-4-20250514` | Anthropic | ~400-800ms | Detailed analysis, long context |
+| `llama-3.1-70b-versatile` | Groq | ~300-500ms | Open-source, strong reasoning |
+| `gemini-1.5-pro` | Google | ~500-1000ms | Very long context, multimodal tasks |
+
+<Callout type="info" title="Tip">
+  For most voice agents, start with `gpt-4o-mini` or `claude-3-haiku-20240307`. These models provide excellent quality at minimal latency. Only upgrade to larger models if you find the smaller models struggling with your specific use case.
+</Callout>
+
+## Temperature
+
+Temperature controls the randomness of the model's output.
+
+| Value | Behavior | Use Case |
+|-------|----------|----------|
+| `0.0` | Deterministic, most focused | Data extraction, structured tasks |
+| `0.3-0.5` | Slightly varied, still focused | Customer support, technical help |
+| `0.7` | Balanced (recommended default) | General conversation |
+| `1.0-1.5` | Creative, more varied | Sales, entertainment |
+| `2.0` | Maximum randomness | Not recommended for voice |
+
+<Callout type="warn">
+  OpenAI reasoning models (`o1`, `o3`, `o4` series) do not support custom temperature values. The temperature parameter is automatically ignored for these models.
+</Callout>
+
+## Max Tokens
+
+The `maxTokens` setting limits the length of each response. For voice agents, shorter responses are almost always better.
+
+| Setting | Tokens | Spoken Duration | Recommendation |
+|---------|--------|-----------------|----------------|
+| Short | 256 | ~15-20 seconds | Quick answers, confirmations |
+| Medium | 512-1024 | ~30-60 seconds | Standard conversations |
+| Long | 2048+ | 2+ minutes | Not recommended for voice |
+
+<Callout type="info">
+  Even with a high `maxTokens` value, a well-written system prompt that instructs the agent to be concise will naturally produce short responses. The `maxTokens` setting is a safety net, not a target.
+</Callout>
+
+## Provider-Specific Notes
+
+### OpenAI
+
+- Newer models (`gpt-4.1`, `gpt-4.5`, `gpt-5` series) use `max_completion_tokens` instead of the legacy `max_tokens` parameter. Relay Agent handles this automatically.
+- Reasoning models (`o1`, `o3`, `o4`) do not support streaming or custom temperature. They work but have higher latency.
+- Set the `OPENAI_API_KEY` environment variable or configure it in your organization settings.
+
+### Anthropic
+
+- System prompts are extracted from the message array and sent as a top-level `system` parameter, following Anthropic's API format.
+- Claude models have excellent instruction-following capabilities, making them particularly good for agents with complex rules.
+- Set the `ANTHROPIC_API_KEY` environment variable.
+
+### Groq
+
+- Groq runs open-source models on custom LPU hardware for extremely fast inference.
+- The `llama-3.1-8b-instant` model on Groq offers the lowest latency of any supported option, making it ideal for latency-sensitive voice applications.
+- Set the `GROQ_API_KEY` environment variable.
+
+### Google
+
+- Gemini models support very long context windows (up to 1M tokens), useful for agents that need to reference large amounts of information.
+- Set the `GOOGLE_API_KEY` environment variable.
+
+### Together
+
+- Together AI hosts a wide range of open-source models.
+- Good option for teams that prefer open-source models with competitive pricing.
+- Set the `TOGETHER_API_KEY` environment variable.
+
+## Switching Models
+
+You can change an agent's model at any time with a `PATCH` request. This is useful for A/B testing different models.
+
+```bash
+curl -X PATCH https://api.relay-agent.com/v1/agents/agent_abc123 \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": {
+      "provider": "anthropic",
+      "model": "claude-3-haiku-20240307",
+      "temperature": 0.7,
+      "maxTokens": 1024,
+      "systemPrompt": "You are a helpful assistant."
+    }
+  }'
+```
+
+<Callout type="info">
+  The system prompt is part of the model configuration. When switching providers, review your system prompt to make sure it works well with the new model's instruction-following style.
+</Callout>

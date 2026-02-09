@@ -1,0 +1,4 @@
+{
+  "title": "Admin Console",
+  "pages": ["workspace", "team-members", "api-keys", "profile"]
+}

@@ -1,5 +1,0 @@
-<svg width="120" height="28" viewBox="0 0 120 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="14" cy="14" r="12" stroke="#22d3ee" stroke-width="2.5" fill="none"/>
-  <path d="M10 9 L18 14 L10 19Z" fill="#22d3ee"/>
-  <text x="32" y="19" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#f0f0f0">Relay Agent</text>
-</svg>

@@ -1,0 +1,12 @@
+{
+  "title": "Deploy",
+  "pages": [
+    "phone-calls",
+    "inbound-calls",
+    "web-calls",
+    "phone-numbers",
+    "campaigns",
+    "webhooks",
+    "webhook-security"
+  ]
+}

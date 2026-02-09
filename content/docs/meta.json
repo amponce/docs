@@ -1,0 +1,16 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "---Get Started---",
+    "get-started",
+    "---Build Your Agent---",
+    "build",
+    "---Deploy---",
+    "deploy",
+    "---Monitor & Optimize---",
+    "monitor",
+    "---Admin Console---",
+    "console"
+  ]
+}

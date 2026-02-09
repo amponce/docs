@@ -1,0 +1,255 @@
+---
+title: "Phone Number Management"
+description: "Register, search, provision, and manage phone numbers for your AI agents."
+---
+
+## Overview
+
+Phone numbers are the entry points for voice calls. Relay Agent lets you register existing numbers from your Twilio or Telnyx account, search for available numbers, and auto-provision new ones with a single API call.
+
+## Register an Existing Number
+
+If you already own a phone number through Twilio or Telnyx, register it with Relay Agent to assign agents:
+
+<Tabs items={["cURL", "TypeScript", "Python"]}>
+<Tab value="cURL">
+```bash
+curl -X POST https://your-host/v1/phone-numbers \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+14155551234",
+    "provider": "twilio",
+    "inboundAgentId": "agent_abc123def456",
+    "outboundAgentId": "agent_xyz789ghi012"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://your-host/v1/phone-numbers", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer ra_your_api_key",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    phoneNumber: "+14155551234",
+    provider: "twilio",
+    inboundAgentId: "agent_abc123def456",
+    outboundAgentId: "agent_xyz789ghi012",
+  }),
+});
+
+const phoneNumber = await response.json();
+```
+</Tab>
+<Tab value="Python">
+```python
+import requests
+
+response = requests.post(
+    "https://your-host/v1/phone-numbers",
+    headers={
+        "Authorization": "Bearer ra_your_api_key",
+        "Content-Type": "application/json",
+    },
+    json={
+        "phoneNumber": "+14155551234",
+        "provider": "twilio",
+        "inboundAgentId": "agent_abc123def456",
+        "outboundAgentId": "agent_xyz789ghi012",
+    },
+)
+
+phone_number = response.json()
+```
+</Tab>
+</Tabs>
+
+### Request Body
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `phoneNumber` | `string` | Yes | Phone number in E.164 format (e.g. `+14155551234`). |
+| `provider` | `string` | No | Telephony provider. One of `twilio`, `telnyx`, `vonage`. Default: `twilio`. |
+| `inboundAgentId` | `string` | No | Agent to handle inbound calls to this number. |
+| `outboundAgentId` | `string` | No | Default agent for outbound calls from this number. |
+| `webhookUrl` | `string` | No | Custom webhook URL for this specific number. |
+| `metadata` | `Record<string, unknown>` | No | Arbitrary metadata. |
+
+## Search Available Numbers
+
+Find phone numbers available for purchase from Twilio:
+
+<Tabs items={["cURL", "TypeScript", "Python"]}>
+<Tab value="cURL">
+```bash
+curl "https://your-host/v1/phone-numbers/available?country=US&areaCode=415&limit=5" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const params = new URLSearchParams({
+  country: "US",
+  areaCode: "415",
+  limit: "5",
+});
+
+const response = await fetch(
+  `https://your-host/v1/phone-numbers/available?${params}`,
+  {
+    headers: { "Authorization": "Bearer ra_your_api_key" },
+  }
+);
+
+const { data } = await response.json();
+// data: [{ phoneNumber: "+14155550100", ... }, ...]
+```
+</Tab>
+<Tab value="Python">
+```python
+import requests
+
+response = requests.get(
+    "https://your-host/v1/phone-numbers/available",
+    headers={"Authorization": "Bearer ra_your_api_key"},
+    params={"country": "US", "areaCode": "415", "limit": 5},
+)
+
+available = response.json()["data"]
+```
+</Tab>
+</Tabs>
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `country` | `string` | ISO 3166-1 alpha-2 country code (e.g. `US`, `GB`). |
+| `areaCode` | `string` | Filter by area code (e.g. `415`). |
+| `contains` | `string` | Search for numbers containing a pattern (e.g. `555`). |
+| `limit` | `number` | Maximum results to return. |
+
+## Provision a New Number
+
+Purchase a number from Twilio and configure it for Relay Agent in a single request:
+
+```bash
+curl -X POST https://your-host/v1/phone-numbers/provision \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+14155550100",
+    "provider": "twilio",
+    "inboundAgentId": "agent_abc123def456",
+    "outboundAgentId": "agent_xyz789ghi012"
+  }'
+```
+
+The provision endpoint performs three operations:
+
+<Steps>
+  <Step title="Purchase">
+    Buys the phone number from Twilio via their API.
+  </Step>
+  <Step title="Configure Webhook">
+    Sets the Twilio voice webhook URL to `https://your-host/v1/webhooks/twilio/voice` so inbound calls are routed to Relay Agent.
+  </Step>
+  <Step title="Register">
+    Creates the phone number record in the Relay Agent database with your agent assignments and provider metadata.
+  </Step>
+</Steps>
+
+### Provision Request Body
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `phoneNumber` | `string` | Yes | The number to purchase (from the search results). |
+| `provider` | `string` | No | `twilio` or `telnyx`. Default: `twilio`. |
+| `inboundAgentId` | `string` | No | Agent for inbound calls. |
+| `outboundAgentId` | `string` | No | Agent for outbound calls. |
+| `metadata` | `Record<string, unknown>` | No | Arbitrary metadata. |
+
+<Callout type="info">
+  Provisioning charges your Twilio account for the phone number. Monthly fees vary by number type and country.
+</Callout>
+
+## Update a Phone Number
+
+Change the agent assignment or webhook URL:
+
+```bash
+curl -X PATCH https://your-host/v1/phone-numbers/{phoneNumberId} \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inboundAgentId": "agent_newAgent123",
+    "outboundAgentId": null
+  }'
+```
+
+Set a field to `null` to clear it (e.g. remove the outbound agent assignment).
+
+### Update Request Body
+
+| Field | Type | Description |
+|---|---|---|
+| `inboundAgentId` | `string \| null` | New inbound agent, or `null` to clear. |
+| `outboundAgentId` | `string \| null` | New outbound agent, or `null` to clear. |
+| `webhookUrl` | `string \| null` | Custom webhook URL, or `null` to clear. |
+| `metadata` | `Record<string, unknown>` | Replace metadata object. |
+
+## List Phone Numbers
+
+```bash
+curl "https://your-host/v1/phone-numbers" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+Returns:
+
+```json
+{
+  "data": [
+    {
+      "id": "pn_aBcDeFgHiJkL",
+      "phoneNumber": "+14155551234",
+      "provider": "twilio",
+      "inboundAgentId": "agent_abc123def456",
+      "outboundAgentId": "agent_xyz789ghi012",
+      "createdAt": "2026-02-08T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+## Delete a Phone Number
+
+Remove a phone number record from Relay Agent. This does not release the number from Twilio.
+
+```bash
+curl -X DELETE https://your-host/v1/phone-numbers/{phoneNumberId} \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+Returns `204 No Content` on success.
+
+<Callout type="warn">
+  Deleting a phone number from Relay Agent does not cancel it with Twilio. You will continue to be billed by Twilio until you release the number in the Twilio Console.
+</Callout>
+
+## Supported Providers
+
+| Provider | Register | Search | Provision |
+|---|---|---|---|
+| Twilio | Yes | Yes | Yes |
+| Telnyx | Yes | Yes | Yes |
+| Vonage | Yes | No | No |
+
+## Next Steps
+
+- [Inbound Calls](/deploy/inbound-calls) -- Configure inbound call handling
+- [Outbound Calls](/deploy/phone-calls) -- Make outbound calls from your numbers
+- [Campaigns](/deploy/campaigns) -- Run batch outbound campaigns

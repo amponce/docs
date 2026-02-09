@@ -1,0 +1,31 @@
+{
+  "name": "relay-agent-docs",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Relay Agent Documentation",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
+    "generate:api": "node scripts/generate-docs.mjs",
+    "postinstall": "fumadocs-mdx"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "fumadocs-core": "^16.5.2",
+    "fumadocs-mdx": "^14.2.7",
+    "fumadocs-openapi": "^10.3.3",
+    "fumadocs-ui": "^16.5.2",
+    "next": "^16.1.6",
+    "postcss": "^8.5.6",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.6",
+    "typescript": "^5.8.3"
+  }
+}

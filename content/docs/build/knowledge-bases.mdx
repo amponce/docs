@@ -1,0 +1,186 @@
+---
+title: "Knowledge Bases"
+description: "Add retrieval-augmented generation (RAG) to your voice agents with knowledge bases."
+---
+
+Knowledge bases let your agent answer questions using your own documents and data. Instead of relying solely on the LLM's training data, the agent retrieves relevant information from your uploaded files in real time during the conversation.
+
+## How RAG Works in Voice
+
+On every conversational turn, Relay Agent runs a retrieval-augmented generation (RAG) pipeline:
+
+1. **User speaks**: The caller says something (e.g., "What's the return policy for electronics?").
+2. **Transcription**: Speech is converted to text.
+3. **Embedding**: The user's utterance is embedded into a vector using the knowledge base's embedding model.
+4. **Retrieval**: The vector is compared against your indexed document chunks using pgvector similarity search. The top-K most relevant chunks are returned.
+5. **Injection**: Retrieved chunks are injected into the LLM prompt using the `contextTemplate`.
+6. **Generation**: The LLM generates a response informed by both its training data and the retrieved context.
+7. **Speech**: The response is synthesized back to audio.
+
+This entire pipeline runs in real time, adding minimal latency to the conversation.
+
+## Creating a Knowledge Base
+
+<Tabs items={["cURL", "SDK"]}>
+<Tab value="cURL">
+```bash
+curl -X POST https://api.relay-agent.com/v1/knowledge-bases \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Product Documentation",
+    "description": "All product manuals and FAQ documents",
+    "embeddingModel": "text-embedding-3-small",
+    "chunkSize": 512,
+    "chunkOverlap": 50
+  }'
+```
+</Tab>
+<Tab value="SDK">
+```typescript
+const kb = await client.knowledgeBases.create({
+  name: 'Product Documentation',
+  description: 'All product manuals and FAQ documents',
+  embeddingModel: 'text-embedding-3-small',
+  chunkSize: 512,
+  chunkOverlap: 50,
+});
+```
+</Tab>
+</Tabs>
+
+### Configuration
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `string` | Required | Display name. 1-200 characters. |
+| `description` | `string` | - | Description of the knowledge base contents. |
+| `embeddingModel` | `string` | `text-embedding-3-small` | OpenAI embedding model to use. |
+| `chunkSize` | `number` | `512` | Characters per chunk. Range: 100-2000. |
+| `chunkOverlap` | `number` | `50` | Overlapping characters between chunks. Range: 0-500. |
+| `metadata` | `object` | - | Arbitrary metadata. |
+
+### Chunk Size Guidelines
+
+| Chunk Size | Best For | Trade-off |
+|------------|----------|-----------|
+| 100-256 | Short FAQs, definitions | More precise retrieval, but less context per chunk |
+| 512 (default) | General documents | Good balance of precision and context |
+| 1000-2000 | Long-form content, policies | More context per chunk, but lower precision |
+
+<Callout type="info" title="Tip">
+  For voice AI, smaller chunks (256-512) tend to work better because responses need to be concise. Large chunks can overwhelm the LLM with too much context for a spoken response.
+</Callout>
+
+## Connecting a Knowledge Base to an Agent
+
+Attach one or more knowledge bases to an agent using the `knowledgeBaseIds` field:
+
+```json
+{
+  "name": "Support Agent",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemPrompt": "You are a support agent. Use the provided context to answer questions accurately. If the context does not contain the answer, say you don't know."
+  },
+  "knowledgeBaseIds": ["kb_abc123", "kb_def456"],
+  "settings": {
+    "rag": {
+      "topK": 3,
+      "threshold": 0.7,
+      "contextTemplate": "[RELEVANT CONTEXT]\n\{\{chunks\}\}\n[/RELEVANT CONTEXT]"
+    }
+  }
+}
+```
+
+You can attach up to 10 knowledge bases to a single agent. When multiple knowledge bases are attached, retrieval runs across all of them and the top-K results are merged.
+
+## RAG Settings
+
+Configure retrieval behavior in the `settings.rag` object:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `topK` | `number` | `3` | Number of chunks to retrieve per turn. Range: 1-10. |
+| `threshold` | `number` | `0.7` | Minimum similarity score (0-1). Chunks below this score are excluded. |
+| `contextTemplate` | `string` | `[RELEVANT CONTEXT]\n\{\{chunks\}\}\n[/RELEVANT CONTEXT]` | Template for injecting chunks into the prompt. The `\{\{chunks\}\}` placeholder is replaced with retrieved text. Max 500 characters. |
+
+### Tuning Retrieval
+
+**topK**: Start with 3. Increase if the agent frequently misses relevant information. Decrease if responses are too slow or the agent gets confused by too much context.
+
+**threshold**: Start with 0.7. Lower the threshold (e.g., 0.5) if relevant chunks are being filtered out. Raise it (e.g., 0.85) if irrelevant chunks are being included.
+
+**contextTemplate**: Customize how chunks appear in the prompt. The default wraps them in clear delimiters so the LLM knows where context begins and ends.
+
+```json
+{
+  "rag": {
+    "topK": 5,
+    "threshold": 0.6,
+    "contextTemplate": "Use the following information to answer the question:\n---\n\{\{chunks\}\}\n---"
+  }
+}
+```
+
+## Testing Retrieval
+
+Test your knowledge base with the query endpoint before connecting it to an agent:
+
+```bash
+curl -X POST https://api.relay-agent.com/v1/knowledge-bases/kb_abc123/query \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What is the return policy for electronics?",
+    "topK": 5
+  }'
+```
+
+The response includes the matched chunks with their similarity scores, so you can evaluate retrieval quality and tune your settings.
+
+## API Reference
+
+### List Knowledge Bases
+
+```bash
+GET /v1/knowledge-bases
+```
+
+### Get Knowledge Base
+
+```bash
+GET /v1/knowledge-bases/:id
+```
+
+### Update Knowledge Base
+
+```bash
+PATCH /v1/knowledge-bases/:id
+```
+
+### Delete Knowledge Base
+
+```bash
+DELETE /v1/knowledge-bases/:id
+```
+
+### List Files
+
+```bash
+GET /v1/knowledge-bases/:id/files
+```
+
+### Delete File
+
+```bash
+DELETE /v1/knowledge-bases/:id/files/:fileId
+```
+
+<Callout type="info">
+  Deleting a file also removes all its chunks and embeddings from the index. This operation cannot be undone.
+</Callout>
+
+See [File Upload](/build/file-upload) for how to add documents to your knowledge base.

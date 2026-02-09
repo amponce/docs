@@ -1,0 +1,428 @@
+---
+title: "Quickstart"
+description: "Create your first voice agent in 5 minutes"
+---
+
+# Quickstart
+
+Build a working voice AI agent and make your first call in under 5 minutes.
+
+## Prerequisites
+
+- **Node.js 22+** (for the SDK) or any HTTP client (curl, Python requests)
+- A **Relay Agent API key** (starts with `ra_`)
+- For phone calls: a Twilio account with a provisioned phone number
+- For web calls: a browser with microphone access
+
+<Callout type="info">
+You can test web calls without any telephony provider. Phone calls require
+Twilio credentials configured on the server.
+</Callout>
+
+---
+
+## Step 1: Get Your API Key
+
+<Steps>
+  <Step title="Open the Admin Console">
+    Navigate to your Relay Agent admin console (default: `http://localhost:5173`).
+  </Step>
+  <Step title="Go to Settings > API Keys">
+    Click **Create API Key**, give it a name like "Development", and copy the
+    key. It starts with `ra_` and is shown only once.
+  </Step>
+  <Step title="Store it securely">
+    Add the key to your environment:
+
+    ```bash
+    export RELAY_API_KEY="ra_your_api_key_here"
+    ```
+  </Step>
+</Steps>
+
+<Callout type="warn">
+API keys are hashed before storage. If you lose your key, you must create a new
+one. There is no way to recover an existing key.
+</Callout>
+
+---
+
+## Step 2: Create Your First Agent
+
+An agent defines the AI personality, voice, model, and behavior for your calls.
+
+<Tabs items={["curl", "TypeScript", "Python"]}>
+<Tab value="curl">
+```bash
+curl -X POST http://localhost:3001/v1/agents \
+  -H "Authorization: Bearer $RELAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Support Agent",
+    "model": {
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "temperature": 0.7,
+      "systemPrompt": "You are a friendly customer support agent for Acme Corp. Help customers with their questions. Be concise and helpful. If you cannot help, offer to transfer them to a human agent."
+    },
+    "voice": {
+      "provider": "elevenlabs",
+      "voiceId": "rachel",
+      "speed": 1.0,
+      "stability": 0.5
+    },
+    "firstMessage": "Hi there! Thanks for calling Acme Corp. How can I help you today?",
+    "settings": {
+      "responsiveness": 0.8,
+      "interruptionSensitivity": 0.7,
+      "backchanneling": false,
+      "endCallAfterSilenceMs": 30000,
+      "maxCallDurationMs": 600000
+    }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+import { RelayClient } from "@relay-agent/sdk";
+
+const client = new RelayClient({
+  apiKey: process.env.RELAY_API_KEY!,
+  baseUrl: "http://localhost:3001",
+});
+
+const agent = await client.agents.create({
+  name: "Support Agent",
+  model: {
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    temperature: 0.7,
+    systemPrompt:
+      "You are a friendly customer support agent for Acme Corp. " +
+      "Help customers with their questions. Be concise and helpful. " +
+      "If you cannot help, offer to transfer them to a human agent.",
+  },
+  voice: {
+    provider: "elevenlabs",
+    voiceId: "rachel",
+    speed: 1.0,
+    stability: 0.5,
+  },
+  firstMessage:
+    "Hi there! Thanks for calling Acme Corp. How can I help you today?",
+  settings: {
+    responsiveness: 0.8,
+    interruptionSensitivity: 0.7,
+    backchanneling: false,
+    endCallAfterSilenceMs: 30000,
+    maxCallDurationMs: 600000,
+  },
+});
+
+console.log("Agent created:", agent.id);
+```
+</Tab>
+<Tab value="Python">
+```python
+import os
+import requests
+
+api_key = os.environ["RELAY_API_KEY"]
+base_url = "http://localhost:3001"
+
+response = requests.post(
+    f"{base_url}/v1/agents",
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "name": "Support Agent",
+        "model": {
+            "provider": "openai",
+            "model": "gpt-4.1-mini",
+            "temperature": 0.7,
+            "systemPrompt": (
+                "You are a friendly customer support agent for Acme Corp. "
+                "Help customers with their questions. Be concise and helpful. "
+                "If you cannot help, offer to transfer them to a human agent."
+            ),
+        },
+        "voice": {
+            "provider": "elevenlabs",
+            "voiceId": "rachel",
+            "speed": 1.0,
+            "stability": 0.5,
+        },
+        "firstMessage": "Hi there! Thanks for calling Acme Corp. How can I help you today?",
+        "settings": {
+            "responsiveness": 0.8,
+            "interruptionSensitivity": 0.7,
+            "backchanneling": False,
+            "endCallAfterSilenceMs": 30000,
+            "maxCallDurationMs": 600000,
+        },
+    },
+)
+response.raise_for_status()
+agent = response.json()
+print(f"Agent created: {agent['id']}")
+```
+</Tab>
+</Tabs>
+
+<Callout type="info" title="Tip">
+Save the returned `id` field (e.g., `agent_a1b2c3d4`). You need it for creating calls.
+</Callout>
+
+You will receive a response like this:
+
+```json
+{
+  "id": "agent_a1b2c3d4e5f6",
+  "orgId": "default",
+  "name": "Support Agent",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "temperature": 0.7,
+    "systemPrompt": "You are a friendly customer support agent..."
+  },
+  "voice": {
+    "provider": "elevenlabs",
+    "voiceId": "rachel",
+    "speed": 1.0,
+    "stability": 0.5
+  },
+  "firstMessage": "Hi there! Thanks for calling Acme Corp. How can I help you today?",
+  "version": 1,
+  "isPublished": false,
+  "createdAt": "2026-02-08T10:30:00.000Z",
+  "updatedAt": "2026-02-08T10:30:00.000Z"
+}
+```
+
+---
+
+## Step 3: Make a Test Call (Web)
+
+Web calls are the easiest way to test without Twilio. Create a web call session
+and connect to the WebSocket.
+
+<Tabs items={["curl", "TypeScript", "Python"]}>
+<Tab value="curl">
+```bash
+# Create the web call session
+curl -X POST http://localhost:3001/v1/calls/web \
+  -H "Authorization: Bearer $RELAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agentId": "agent_a1b2c3d4e5f6"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const webCall = await client.calls.createWeb({
+  agentId: "agent_a1b2c3d4e5f6",
+});
+
+console.log("Call ID:", webCall.id);
+console.log("Access Token:", webCall.accessToken);
+console.log("WebSocket URL:", webCall.websocketUrl);
+```
+</Tab>
+<Tab value="Python">
+```python
+response = requests.post(
+    f"{base_url}/v1/calls/web",
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    },
+    json={"agentId": "agent_a1b2c3d4e5f6"},
+)
+response.raise_for_status()
+web_call = response.json()
+print(f"Call ID: {web_call['id']}")
+print(f"WebSocket URL: {web_call['websocketUrl']}")
+```
+</Tab>
+</Tabs>
+
+The response includes an `accessToken` and a `websocketUrl`:
+
+```json
+{
+  "id": "call_x9y8z7w6",
+  "agentId": "agent_a1b2c3d4e5f6",
+  "status": "queued",
+  "accessToken": "rat_tok_abc123def456",
+  "websocketUrl": "/v1/calls/web-stream?callId=call_x9y8z7w6&agentId=agent_a1b2c3d4e5f6&token=rat_tok_abc123def456"
+}
+```
+
+---
+
+## Step 4: Connect to WebSocket for Audio
+
+Use the `websocketUrl` from the previous step to open a WebSocket connection.
+Stream PCM16 audio (16kHz, mono, 16-bit little-endian) to the server and
+receive base64-encoded PCM16 audio back.
+
+```typescript TypeScript (Browser)
+const baseUrl = "ws://localhost:3001";
+const websocketUrl = webCall.websocketUrl; // from Step 3
+
+const ws = new WebSocket(`${baseUrl}${websocketUrl}`);
+ws.binaryType = "arraybuffer";
+
+ws.onopen = () => {
+  console.log("Connected to voice agent");
+  startMicrophone(ws);
+};
+
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  if (message.type === "audio") {
+    // Decode base64 PCM16 and play through speakers
+    const audioData = atob(message.audio);
+    playAudio(audioData);
+  }
+
+  if (message.type === "transcript") {
+    console.log(`[${message.role}]: ${message.text}`);
+  }
+};
+
+ws.onclose = (event) => {
+  console.log("Call ended:", event.reason);
+};
+
+// Stream microphone audio to the WebSocket
+async function startMicrophone(ws: WebSocket) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      sampleRate: 16000,
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+    },
+  });
+
+  const audioContext = new AudioContext({ sampleRate: 16000 });
+  const source = audioContext.createMediaStreamSource(stream);
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+  processor.onaudioprocess = (e) => {
+    const float32 = e.inputBuffer.getChannelData(0);
+    // Convert Float32 to Int16
+    const int16 = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
+    }
+    // Send as base64
+    const base64 = btoa(
+      String.fromCharCode(...new Uint8Array(int16.buffer))
+    );
+    ws.send(JSON.stringify({ type: "audio", audio: base64 }));
+  };
+
+  source.connect(processor);
+  processor.connect(audioContext.destination);
+}
+```
+
+<Callout type="info">
+For phone calls, use `POST /v1/calls/phone` instead. You need a Twilio phone number
+configured on the server. The audio pipeline handles mulaw encoding automatically.
+</Callout>
+
+---
+
+## Step 5: Make a Phone Call (Optional)
+
+If you have Twilio configured, try an outbound phone call:
+
+<Tabs items={["curl", "TypeScript", "Python"]}>
+<Tab value="curl">
+```bash
+curl -X POST http://localhost:3001/v1/calls/phone \
+  -H "Authorization: Bearer $RELAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agentId": "agent_a1b2c3d4e5f6",
+    "from": "+15551234567",
+    "to": "+15559876543",
+    "dynamicVariables": {
+      "customerName": "Jane",
+      "orderId": "ORD-12345"
+    }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const phoneCall = await client.calls.createPhone({
+  agentId: "agent_a1b2c3d4e5f6",
+  from: "+15551234567",
+  to: "+15559876543",
+  dynamicVariables: {
+    customerName: "Jane",
+    orderId: "ORD-12345",
+  },
+});
+
+console.log("Phone call initiated:", phoneCall.id);
+console.log("Status:", phoneCall.status);
+```
+</Tab>
+<Tab value="Python">
+```python
+response = requests.post(
+    f"{base_url}/v1/calls/phone",
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "agentId": "agent_a1b2c3d4e5f6",
+        "from": "+15551234567",
+        "to": "+15559876543",
+        "dynamicVariables": {
+            "customerName": "Jane",
+            "orderId": "ORD-12345",
+        },
+    },
+)
+response.raise_for_status()
+phone_call = response.json()
+print(f"Phone call initiated: {phone_call['id']}")
+```
+</Tab>
+</Tabs>
+
+<Callout type="info" title="Tip">
+Dynamic variables are injected into the system prompt using `\{\{mustache\}\}` syntax.
+Use them in your agent's system prompt like: "The customer's name is \{\{customerName\}\}."
+</Callout>
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card title="Core Concepts" href="/get-started/concepts">
+    Learn about agents, the audio pipeline, tools, knowledge bases, and compositions.
+  </Card>
+  <Card title="Authentication" href="/get-started/authentication">
+    Understand API key management, rate limiting, and RBAC roles.
+  </Card>
+  <Card title="SDKs" href="/get-started/sdks">
+    Install the TypeScript SDK and explore all available methods.
+  </Card>
+  <Card title="API Reference" href="/api-reference">
+    Full endpoint documentation with request and response schemas.
+  </Card>
+</Cards>

@@ -1,0 +1,179 @@
+---
+title: "Agent Transfers"
+description: "Hand off calls between AI agents for multi-agent workflows and compositions."
+---
+
+Agent transfer tools let one AI agent hand off a live call to a different AI agent. This enables multi-agent workflows where specialized agents handle different parts of a conversation -- a receptionist routes to a scheduler, a qualifier routes to a sales agent, or a triage agent routes to a specialist.
+
+## How It Works
+
+When the LLM decides to invoke an `agent_transfer` tool:
+
+1. The current agent speaks its `executionMessage` (e.g., "Let me connect you with our scheduling specialist").
+2. Relay Agent loads the destination agent's configuration.
+3. If `sharedContext` is enabled (via [compositions](/build/compositions)), the conversation transcript is carried over.
+4. The destination agent takes over the call seamlessly.
+5. Webhooks and post-call analysis run according to the configured settings.
+
+## Configuration
+
+```json
+{
+  "type": "agent_transfer",
+  "name": "transfer_to_scheduler",
+  "description": "Transfer to the scheduling agent when the caller wants to book, reschedule, or cancel an appointment.",
+  "agentId": "agent_scheduler_001",
+  "webhookSetting": "both_agents",
+  "postCallAnalysisSetting": "both_agents",
+  "execution": {
+    "speakDuringExecution": false,
+    "speakAfterExecution": false,
+    "executionMessage": "Let me connect you with our scheduling specialist.",
+    "timeoutMs": 10000
+  }
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `type` | `"agent_transfer"` | Yes | - | Must be `"agent_transfer"`. |
+| `name` | `string` | Yes | - | Unique tool name. |
+| `description` | `string` | No | - | Tells the LLM when to use this transfer. |
+| `agentId` | `string` | Yes | - | ID of the destination agent to hand off to. |
+| `webhookSetting` | `string` | No | `"both_agents"` | Controls which agents' webhooks fire. |
+| `postCallAnalysisSetting` | `string` | No | `"both_agents"` | Controls which agents run post-call analysis. |
+| `execution` | `object` | No | - | Execution behavior settings. |
+
+## Webhook Settings
+
+The `webhookSetting` field controls which agents receive webhook events when a transfer occurs.
+
+| Value | Behavior |
+|-------|----------|
+| `both_agents` | Both the source and destination agents' `serverUrl` webhooks receive events. Use this when both systems need to know about the call. |
+| `only_destination` | Only the destination agent's webhook receives events. Use this when the source agent is a generic router. |
+| `only_source` | Only the source agent's webhook receives events. Use this when the destination agent is an internal specialist. |
+
+## Post-Call Analysis Settings
+
+The `postCallAnalysisSetting` field controls which agents run their `postCallAnalysis` fields after the call ends.
+
+| Value | Behavior |
+|-------|----------|
+| `both_agents` | Both agents' post-call analysis configurations run. The results are merged. |
+| `only_destination` | Only the destination agent's analysis runs. |
+| `only_source` | Only the source agent's analysis runs. |
+
+<Callout type="info" title="Tip">
+  If your source agent is a simple router that just identifies intent, set `postCallAnalysisSetting` to `"only_destination"` so only the specialist agent's analysis runs. This avoids redundant LLM calls.
+</Callout>
+
+## Shared Context
+
+When agent transfers happen within a [composition](/build/compositions) with `sharedContext: true`, the full conversation transcript carries over to the destination agent. This means:
+
+- The destination agent knows what was already discussed.
+- The caller does not have to repeat themselves.
+- The destination agent's system prompt can reference prior context.
+
+Without shared context, the destination agent starts with a clean slate and only its own system prompt.
+
+## Example: Three-Agent Workflow
+
+This example shows a receptionist agent that routes to either a scheduling agent or a support agent.
+
+### Receptionist Agent
+
+```json
+{
+  "name": "Receptionist",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemPrompt": "You are the front desk receptionist for Lakewood Medical. Greet callers, identify their need, and route them to the right department.\n\nRouting rules:\n- Appointment scheduling, rescheduling, or cancellation: transfer to scheduler\n- Medical questions, prescription refills, test results: transfer to support\n- If unclear, ask one clarifying question before routing."
+  },
+  "voice": {
+    "provider": "elevenlabs",
+    "voiceId": "21m00Tcm4TlvDq8ikWAM"
+  },
+  "firstMessage": "Thank you for calling Lakewood Medical. How can I direct your call?",
+  "tools": [
+    {
+      "type": "agent_transfer",
+      "name": "transfer_to_scheduler",
+      "description": "Transfer when the caller wants to schedule, reschedule, or cancel an appointment.",
+      "agentId": "agent_scheduler_001",
+      "webhookSetting": "only_destination",
+      "postCallAnalysisSetting": "only_destination",
+      "execution": {
+        "executionMessage": "I'll connect you with our scheduling team."
+      }
+    },
+    {
+      "type": "agent_transfer",
+      "name": "transfer_to_support",
+      "description": "Transfer when the caller has medical questions, needs prescription refills, or wants test results.",
+      "agentId": "agent_support_001",
+      "webhookSetting": "only_destination",
+      "postCallAnalysisSetting": "only_destination",
+      "execution": {
+        "executionMessage": "Let me connect you with our medical support team."
+      }
+    }
+  ]
+}
+```
+
+### Scheduling Agent
+
+```json
+{
+  "name": "Scheduling Specialist",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "systemPrompt": "You are the appointment scheduling specialist for Lakewood Medical. Help callers book, reschedule, or cancel appointments.\n\nAvailable times: Monday-Friday 8am-5pm, Saturday 9am-1pm.\nProviders: Dr. Smith (general), Dr. Johnson (cardiology), Dr. Lee (dermatology).\n\nAlways confirm: date, time, provider, and reason for visit before booking."
+  },
+  "voice": {
+    "provider": "elevenlabs",
+    "voiceId": "pNInz6obpgDQGcFmaJgB"
+  },
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "book_appointment",
+        "description": "Book an appointment after confirming all details with the caller.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": { "type": "string", "description": "Appointment date (YYYY-MM-DD)" },
+            "time": { "type": "string", "description": "Appointment time (HH:MM)" },
+            "provider": { "type": "string", "description": "Doctor name" },
+            "reason": { "type": "string", "description": "Reason for visit" }
+          },
+          "required": ["date", "time", "provider", "reason"]
+        }
+      },
+      "server": {
+        "url": "https://api.lakewood.com/appointments"
+      }
+    }
+  ]
+}
+```
+
+## Relationship to Compositions
+
+Agent transfers can be used standalone (any agent can transfer to any other agent by ID), but they are most powerful when used within [compositions](/build/compositions). Compositions add:
+
+- **Transition rules**: Define conditions for automatic routing between agents.
+- **Shared context**: Automatically carry the conversation transcript across transfers.
+- **Seamless handoff**: No audible interruption during the switch.
+- **Router agent**: A dedicated agent that orchestrates the flow.
+
+See [Compositions](/build/compositions) for the full multi-agent orchestration guide.
+
+<Callout type="warn">
+  The destination `agentId` must reference a valid, existing agent in your organization. If the agent ID is invalid or deleted, the transfer will fail and the current agent will receive an error.
+</Callout>

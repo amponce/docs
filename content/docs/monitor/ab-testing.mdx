@@ -1,0 +1,291 @@
+---
+title: "A/B Testing"
+description: "Compare agent configurations with controlled traffic splits and measured success metrics."
+---
+
+## Overview
+
+The A/B testing framework lets you compare two agent variants head-to-head. Split traffic between Variant A and Variant B, measure performance using built-in success metrics, and promote the winner -- all without disrupting live call flow.
+
+Use cases include testing different system prompts, voice configurations, LLM models, or entirely different agents.
+
+## Concepts
+
+| Term | Description |
+|---|---|
+| **Variant** | A specific agent configuration. Each variant has an `agentId` and an optional `version`. |
+| **Traffic Split** | The percentage of calls routed to each variant. Must sum to 100. |
+| **Success Metric** | How "winning" is determined: call duration, sentiment, tool success, or a custom metric. |
+| **Promotion** | Marking the test as complete and selecting the winning variant for full traffic. |
+
+## Create an A/B Test
+
+<Tabs items={["cURL", "TypeScript", "Python"]}>
+<Tab value="cURL">
+```bash
+curl -X POST https://your-host/v1/ab-tests \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "GPT-4o vs GPT-4o-mini",
+    "description": "Compare response quality between models",
+    "variantA": {
+      "agentId": "agent_gpt4o_main",
+      "label": "GPT-4o (full)"
+    },
+    "variantB": {
+      "agentId": "agent_gpt4o_mini",
+      "label": "GPT-4o-mini (fast)"
+    },
+    "trafficSplit": {
+      "a": 50,
+      "b": 50
+    },
+    "successMetric": "sentiment",
+    "phoneNumbers": ["+14155551234"]
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const response = await fetch("https://your-host/v1/ab-tests", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer ra_your_api_key",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    name: "GPT-4o vs GPT-4o-mini",
+    description: "Compare response quality between models",
+    variantA: {
+      agentId: "agent_gpt4o_main",
+      label: "GPT-4o (full)",
+    },
+    variantB: {
+      agentId: "agent_gpt4o_mini",
+      label: "GPT-4o-mini (fast)",
+    },
+    trafficSplit: { a: 50, b: 50 },
+    successMetric: "sentiment",
+    phoneNumbers: ["+14155551234"],
+  }),
+});
+
+const test = await response.json();
+```
+</Tab>
+<Tab value="Python">
+```python
+import requests
+
+response = requests.post(
+    "https://your-host/v1/ab-tests",
+    headers={
+        "Authorization": "Bearer ra_your_api_key",
+        "Content-Type": "application/json",
+    },
+    json={
+        "name": "GPT-4o vs GPT-4o-mini",
+        "description": "Compare response quality between models",
+        "variantA": {
+            "agentId": "agent_gpt4o_main",
+            "label": "GPT-4o (full)",
+        },
+        "variantB": {
+            "agentId": "agent_gpt4o_mini",
+            "label": "GPT-4o-mini (fast)",
+        },
+        "trafficSplit": {"a": 50, "b": 50},
+        "successMetric": "sentiment",
+        "phoneNumbers": ["+14155551234"],
+    },
+)
+
+test = response.json()
+```
+</Tab>
+</Tabs>
+
+### Request Body
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | Yes | Test name (max 200 characters). |
+| `description` | `string` | No | Optional description of the test hypothesis. |
+| `variantA` | `object` | Yes | Configuration for Variant A. |
+| `variantB` | `object` | Yes | Configuration for Variant B. |
+| `trafficSplit` | `object` | Yes | Traffic distribution. `a` + `b` must equal 100. |
+| `phoneNumbers` | `string[]` | No | Restrict the test to specific phone numbers. |
+| `successMetric` | `string` | Yes | How to measure success (see below). |
+
+### Variant Object
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `agentId` | `string` | Yes | The agent to use for this variant. |
+| `version` | `number` | No | Specific agent version. Uses latest if not specified. |
+| `label` | `string` | No | Human-readable label for this variant. |
+
+### Traffic Split
+
+```json
+{ "a": 70, "b": 30 }
+```
+
+Values must be integers between 1 and 99, and must sum to exactly 100. The system uses a deterministic hash of the caller ID to ensure consistent routing -- the same caller always reaches the same variant.
+
+### Success Metrics
+
+| Metric | Description |
+|---|---|
+| `duration` | Shorter average call duration indicates more efficient conversations. |
+| `sentiment` | Higher average sentiment score (from post-call analysis) indicates better caller satisfaction. |
+| `tool_success` | Higher tool invocation success rate indicates the agent is more effective at completing tasks. |
+| `custom` | Use your own metric, tracked via webhook events and the metadata field. |
+
+## Test Lifecycle
+
+```
+draft --> running --> completed
+```
+
+| Status | Description |
+|---|---|
+| `draft` | Created but not active. Configuration can be modified. |
+| `running` | Actively routing calls to variants. No configuration changes allowed. |
+| `completed` | Test is finished. The winning variant has been promoted. |
+
+## Start a Test
+
+Transition from `draft` to `running`:
+
+```bash
+curl -X POST https://your-host/v1/ab-tests/{testId}/start \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+<Callout type="warn">
+  Only tests in `draft` status can be started. Once running, the test configuration (variants, traffic split, metric) cannot be changed. Create a new test if you need different parameters.
+</Callout>
+
+## View Results
+
+Get the test details including accumulated results:
+
+```bash
+curl "https://your-host/v1/ab-tests/{testId}" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+### Response
+
+```json
+{
+  "id": "abt_aBcDeFgHiJkLmNoPqRsTuVw",
+  "name": "GPT-4o vs GPT-4o-mini",
+  "status": "running",
+  "variantA": {
+    "agentId": "agent_gpt4o_main",
+    "label": "GPT-4o (full)"
+  },
+  "variantB": {
+    "agentId": "agent_gpt4o_mini",
+    "label": "GPT-4o-mini (fast)"
+  },
+  "trafficSplit": { "a": 50, "b": 50 },
+  "successMetric": "sentiment",
+  "startedAt": "2026-02-05T09:00:00.000Z",
+  "createdAt": "2026-02-04T15:30:00.000Z"
+}
+```
+
+## Promote the Winner
+
+End the test and promote the winning variant to take 100% of traffic:
+
+```bash
+curl -X POST https://your-host/v1/ab-tests/{testId}/promote \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+This transitions the test to `completed` status and records the `endedAt` timestamp. Promotion is available for tests in `running` or `completed` status.
+
+<Callout type="info" title="Tip">
+  After promoting, update the phone number's `inboundAgentId` or your outbound call logic to use the winning agent for all future calls.
+</Callout>
+
+## Update a Test
+
+Modify a test that is still in `draft` status:
+
+```bash
+curl -X PATCH https://your-host/v1/ab-tests/{testId} \
+  -H "Authorization: Bearer ra_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "trafficSplit": { "a": 80, "b": 20 },
+    "description": "Updated: heavier weight on Variant A"
+  }'
+```
+
+## List All Tests
+
+```bash
+curl "https://your-host/v1/ab-tests" \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+### Response
+
+```json
+{
+  "data": [
+    {
+      "id": "abt_aBcDeFgHiJkLmNoPqRsTuVw",
+      "name": "GPT-4o vs GPT-4o-mini",
+      "status": "running",
+      "successMetric": "sentiment",
+      "startedAt": "2026-02-05T09:00:00.000Z"
+    },
+    {
+      "id": "abt_xYz123AbC456DeF789",
+      "name": "Friendly vs Professional tone",
+      "status": "completed",
+      "successMetric": "duration",
+      "startedAt": "2026-01-20T09:00:00.000Z",
+      "endedAt": "2026-02-01T09:00:00.000Z"
+    }
+  ]
+}
+```
+
+## Delete a Test
+
+Remove a test that is in `draft` or `completed` status:
+
+```bash
+curl -X DELETE https://your-host/v1/ab-tests/{testId} \
+  -H "Authorization: Bearer ra_your_api_key"
+```
+
+Returns `204 No Content` on success.
+
+<Callout type="warn">
+  Running tests cannot be deleted. Promote the test first to transition it to `completed`, then delete if needed.
+</Callout>
+
+## Practical Test Ideas
+
+| What to Test | Variant A | Variant B | Metric |
+|---|---|---|---|
+| LLM model quality | GPT-4o | GPT-4o-mini | `sentiment` |
+| Voice personality | Warm, empathetic tone | Direct, professional tone | `duration` |
+| System prompt | Verbose instructions | Concise instructions | `tool_success` |
+| First message | Formal greeting | Casual greeting | `sentiment` |
+| Agent version | v3 (current) | v4 (candidate) | `custom` |
+
+## Next Steps
+
+- [Usage](/monitor/usage) -- Compare costs between variants
+- [DevTools](/monitor/devtools) -- Inspect individual calls from each variant
+- [Call History](/monitor/call-history) -- Filter calls by agent to analyze variant performance

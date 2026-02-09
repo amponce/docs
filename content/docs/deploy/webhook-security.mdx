@@ -1,0 +1,234 @@
+---
+title: "Webhook Security"
+description: "Verify webhook signatures with HMAC-SHA256 to ensure events are authentic."
+---
+
+## Overview
+
+Every webhook event sent by Relay Agent is signed with HMAC-SHA256 using your webhook signing secret. You should always verify this signature before processing any event to ensure the request is authentic and has not been tampered with.
+
+## How Signing Works
+
+1. Relay Agent serializes the event payload as a JSON string.
+2. The JSON string is signed using `HMAC-SHA256` with your webhook signing secret.
+3. The resulting hex digest is sent in the `X-Relay-Signature` header.
+
+```
+X-Relay-Signature: <hmac_sha256_hex_digest>
+```
+
+## Verification
+
+To verify a webhook:
+
+1. Read the raw request body as a string (before any JSON parsing).
+2. Compute the HMAC-SHA256 digest of the body using your signing secret.
+3. Compare the computed digest with the `X-Relay-Signature` header using a constant-time comparison.
+
+<Callout type="warn">
+  Always use a constant-time comparison function (e.g. `crypto.timingSafeEqual` in Node.js or `hmac.compare_digest` in Python) to prevent timing attacks.
+</Callout>
+
+## Code Examples
+
+<Tabs items={["Node.js", "Python", "Go"]}>
+<Tab value="Node.js">
+```typescript
+import crypto from "crypto";
+
+const WEBHOOK_SECRET = process.env.RELAY_WEBHOOK_SECRET!;
+
+function verifyWebhookSignature(
+  rawBody: string,
+  signature: string
+): boolean {
+  const expected = crypto
+    .createHmac("sha256", WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest("hex");
+
+  if (expected.length !== signature.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(expected),
+    Buffer.from(signature)
+  );
+}
+
+// Express middleware example
+function webhookVerification(req, res, next) {
+  const signature = req.headers["x-relay-signature"];
+
+  if (!signature) {
+    return res.status(401).json({ error: "Missing signature header" });
+  }
+
+  // IMPORTANT: Use raw body, not parsed JSON
+  const rawBody = JSON.stringify(req.body);
+
+  if (!verifyWebhookSignature(rawBody, signature)) {
+    return res.status(401).json({ error: "Invalid signature" });
+  }
+
+  next();
+}
+```
+</Tab>
+<Tab value="Python">
+```python
+import hmac
+import hashlib
+import os
+
+WEBHOOK_SECRET = os.environ["RELAY_WEBHOOK_SECRET"]
+
+def verify_webhook_signature(raw_body: str, signature: str) -> bool:
+    """Verify the HMAC-SHA256 signature of a webhook payload."""
+    expected = hmac.new(
+        WEBHOOK_SECRET.encode("utf-8"),
+        raw_body.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    return hmac.compare_digest(expected, signature)
+
+
+# Flask example
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+@app.route("/webhooks/relay", methods=["POST"])
+def handle_webhook():
+    signature = request.headers.get("X-Relay-Signature", "")
+    raw_body = request.get_data(as_text=True)
+
+    if not verify_webhook_signature(raw_body, signature):
+        return jsonify({"error": "Invalid signature"}), 401
+
+    event = request.get_json()
+    # Process the event...
+    return jsonify({"received": True}), 200
+```
+</Tab>
+<Tab value="Go">
+```go
+package main
+
+import (
+    "crypto/hmac"
+    "crypto/sha256"
+    "encoding/hex"
+    "io"
+    "net/http"
+    "os"
+)
+
+var webhookSecret = os.Getenv("RELAY_WEBHOOK_SECRET")
+
+func verifyWebhookSignature(rawBody []byte, signature string) bool {
+    mac := hmac.New(sha256.New, []byte(webhookSecret))
+    mac.Write(rawBody)
+    expected := hex.EncodeToString(mac.Sum(nil))
+    return hmac.Equal([]byte(expected), []byte(signature))
+}
+
+func webhookHandler(w http.ResponseWriter, r *http.Request) {
+    signature := r.Header.Get("X-Relay-Signature")
+    if signature == "" {
+        http.Error(w, "Missing signature", http.StatusUnauthorized)
+        return
+    }
+
+    body, err := io.ReadAll(r.Body)
+    if err != nil {
+        http.Error(w, "Failed to read body", http.StatusBadRequest)
+        return
+    }
+
+    if !verifyWebhookSignature(body, signature) {
+        http.Error(w, "Invalid signature", http.StatusUnauthorized)
+        return
+    }
+
+    w.WriteHeader(http.StatusOK)
+    w.Write([]byte(`{"received": true}`))
+}
+```
+</Tab>
+</Tabs>
+
+## Webhook Headers Reference
+
+Every webhook delivery includes these headers:
+
+| Header | Example | Description |
+|---|---|---|
+| `Content-Type` | `application/json` | Always JSON. |
+| `X-Relay-Signature` | `a1b2c3d4e5f6...` | HMAC-SHA256 hex digest of the request body. |
+| `X-Relay-Event` | `call.started` | The event type for quick routing. |
+| `X-Relay-Timestamp` | `2026-02-08T12:00:00.000Z` | ISO 8601 timestamp of the delivery attempt. |
+
+## Configuring Your Signing Secret
+
+The webhook signing secret is configured in your Relay Agent environment:
+
+```bash
+# .env
+WEBHOOK_SIGNING_SECRET=your_secret_key_here
+```
+
+<Callout type="info" title="Tip">
+  Generate a strong random secret using: `openssl rand -hex 32`
+</Callout>
+
+This secret is used globally for all webhook deliveries. It is shared between the Relay Agent server and your webhook endpoint. Keep it secret and rotate it periodically.
+
+## Security Best Practices
+
+<Steps>
+  <Step title="Always verify signatures">
+    Never process a webhook event without verifying the `X-Relay-Signature` header. Unverified webhooks could be forged by an attacker.
+  </Step>
+  <Step title="Use constant-time comparison">
+    Use `crypto.timingSafeEqual` (Node.js), `hmac.compare_digest` (Python), or `hmac.Equal` (Go). String equality checks like `===` are vulnerable to timing attacks.
+  </Step>
+  <Step title="Use HTTPS">
+    Always expose your webhook endpoint over HTTPS. Webhook payloads may contain sensitive call data and transcripts.
+  </Step>
+  <Step title="Validate the timestamp">
+    Check the `X-Relay-Timestamp` header and reject events older than 5 minutes to prevent replay attacks.
+  </Step>
+  <Step title="Respond quickly">
+    Return a `2xx` response within 5 seconds. If processing takes longer, accept the event immediately and process it asynchronously.
+  </Step>
+  <Step title="Handle duplicates">
+    Use the event `id` field for idempotency. Retried deliveries will have the same `id` -- deduplicate in your handler.
+  </Step>
+  <Step title="Rotate secrets periodically">
+    Change your webhook signing secret on a regular schedule. Update both the Relay Agent `.env` and your webhook handler simultaneously.
+  </Step>
+</Steps>
+
+## Timestamp Validation Example
+
+```typescript
+function isTimestampValid(timestamp: string, toleranceMs = 300_000): boolean {
+  const eventTime = new Date(timestamp).getTime();
+  const now = Date.now();
+  return Math.abs(now - eventTime) < toleranceMs;
+}
+
+// In your webhook handler:
+const timestamp = req.headers["x-relay-timestamp"] as string;
+if (!isTimestampValid(timestamp)) {
+  return res.status(401).json({ error: "Event too old — possible replay" });
+}
+```
+
+## Next Steps
+
+- [Webhooks](/deploy/webhooks) -- Full event type reference and payload details
+- [DevTools](/monitor/devtools) -- Real-time call inspection as an alternative to webhooks
